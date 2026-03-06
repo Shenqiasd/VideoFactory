@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}账号管理 - 视频工厂{% endblock %}
+{% block nav_accounts %}active{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-[21px] font-bold text-fg-strong">账号管理</h1>
+    <p class="text-[14px] text-fg-sub mt-1">管理各平台发布账号</p>
+</div>
+
+<div x-data="accountsApp()" class="space-y-5">
+    <!-- Add Account Form -->
+    <div class="rounded-3xl border border-border p-6 shadow-card">
+        <h2 class="text-[15px] font-semibold text-fg-strong mb-4">添加账号</h2>
+        <form @submit.prevent="addAccount" class="grid grid-cols-3 gap-4">
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1.5">平台</label>
+                <select x-model="form.platform" required class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none">
+                    <option value="">选择平台</option>
+                    <option value="douyin">抖音</option>
+                    <option value="xiaohongshu">小红书</option>
+                    <option value="bilibili">哔哩哔哩</option>
+                    <option value="youtube">YouTube</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1.5">账号名</label>
+                <input x-model="form.username" type="text" required placeholder="输入账号名" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+            </div>
+            <div class="flex items-end">
+                <button type="submit" class="w-full h-10 px-4 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong transition">添加</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Accounts List -->
+    <div class="rounded-3xl border border-border shadow-card overflow-hidden">
+        <div class="p-6 border-b border-border">
+            <h2 class="text-[15px] font-semibold text-fg-strong">账号列表</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-muted/40">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">平台</th>
+                        <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">账号名</th>
+                        <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">添加时间</th>
+                        <th class="px-6 py-3 text-right text-[12px] font-semibold text-fg-sub">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-border">
+                    <template x-for="account in accounts" :key="account.id">
+                        <tr class="hover:bg-muted/20 transition">
+                            <td class="px-6 py-4 text-[13px] text-fg-strong" x-text="account.platform"></td>
+                            <td class="px-6 py-4 text-[13px] text-fg-strong" x-text="account.username"></td>
+                            <td class="px-6 py-4 text-[13px] text-fg-sub" x-text="account.created_at"></td>
+                            <td class="px-6 py-4 text-right">
+                                <button @click="deleteAccount(account.id)" class="px-3 py-1.5 rounded-xl bg-red-50 text-red-600 text-[12px] font-medium hover:bg-red-100 transition">删除</button>
+                            </td>
+                        </tr>
+                    </template>
+                    <tr x-show="accounts.length === 0">
+                        <td colspan="4" class="px-6 py-8 text-center text-[13px] text-fg-sub">暂无账号</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+function accountsApp() {
+    return {
+        accounts: [],
+        form: { platform: '', username: '' },
+
+        async init() {
+            await this.loadAccounts();
+        },
+
+        async loadAccounts() {
+            try {
+                const res = await fetch('/api/accounts');
+                const data = await res.json();
+                this.accounts = data.accounts || [];
+            } catch (e) {
+                console.error('加载失败:', e);
+            }
+        },
+
+        async addAccount() {
+            try {
+                const res = await fetch('/api/accounts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.form)
+                });
+                if (res.ok) {
+                    this.form = { platform: '', username: '' };
+                    await this.loadAccounts();
+                }
+            } catch (e) {
+                console.error('添加失败:', e);
+            }
+        },
+
+        async deleteAccount(id) {
+            if (!confirm('确认删除此账号？')) return;
+            try {
+                const res = await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
+                if (res.ok) await this.loadAccounts();
+            } catch (e) {
+                console.error('删除失败:', e);
+            }
+        }
+    }
+}
+</script>
+{% endblock %}

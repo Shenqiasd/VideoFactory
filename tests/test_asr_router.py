@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -10,12 +11,12 @@ from asr import ASRResult, ASRRouter  # noqa: E402
 
 
 class _DummyProvider:
-    def __init__(self, name: str, result: ASRResult | None):
+    def __init__(self, name: str, result: Optional[ASRResult]):
         self.name = name
         self.result = result
         self.calls = 0
 
-    async def transcribe(self, *, video_url: str, video_path: str | None, source_lang: str):
+    async def transcribe(self, *, video_url: str, video_path: Optional[str], source_lang: str):
         self.calls += 1
         return self.result
 

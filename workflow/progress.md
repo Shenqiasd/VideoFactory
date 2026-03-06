@@ -285,3 +285,9 @@
   - 更新 README.md（完整项目说明）
   - 创建 workflow/GITHUB_SETUP.md（Git工作流规范）
   - 创建 scripts/init_github.sh（一键初始化脚本）
+- 完成 GitHub 上传
+  - 清理敏感信息（API Key）
+  - 推送到 https://github.com/Shenqiasd/VideoFactory
+  - 创建 main 和 develop 分支
+- 创建 Git 工作流文档
+  - workflow/GIT_WORKFLOW_CLAUDE_CODEX.md（详细操作流程）

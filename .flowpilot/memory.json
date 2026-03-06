@@ -1,0 +1,135 @@
+[
+  {
+    "content": "新增GET /api/distribute/stats返回发布队列统计(总数/按状态/按平台) [DECISION] 复用scheduler.get_queue_status()和_queue属性，避免重复代码",
+    "source": "task-008",
+    "timestamp": "2026-03-06T09:04:08.032Z",
+    "refs": 4,
+    "archived": false
+  },
+  {
+    "content": "定义了 PublishTask 和 Account 两个 dataclass，使用 Python dataclasses 实现轻量级数据结构 [DECISION] 选择 dataclass 而非普通类，因为自动生成 __init__、__repr__ 等方法，代码更简洁 [ARCHITECTURE] PublishTask 包含发布任务核心字段（task_id、platform、video_path、title 等），Account 管理平台账号信息（platform、account_id、cookies_path 等）",
+    "source": "task-001",
+    "timestamp": "2026-03-06T09:04:08.750Z",
+    "refs": 5,
+    "archived": false
+  },
+  {
+    "content": "项目使用FastAPI+PublishScheduler管理发布队列 [DECISION] 复用现有distribute.scheduler模块而非重新实现队列逻辑 [ARCHITECTURE] API层通过全局单例访问TaskStore和PublishScheduler",
+    "source": "task-003",
+    "timestamp": "2026-03-06T09:04:12.608Z",
+    "refs": 0,
+    "archived": false
+  },
+  {
+    "content": "项目使用 social-auto-upload 进行多平台发布，支持抖音/B站/小红书/YouTube/视频号 5 个平台 [DECISION] 将适配器逻辑从 publisher.py 分离到独立的 adapter.py 文件，提高代码模块化 [ARCHITECTURE] 适配器模式：基类 SocialAutoUploadAdapter 定义接口，LocalSocialAutoUploadAdapter 本地执行脚本，RemoteSocialAutoUploadAdapter 通过 VPS 网关远程执行",
+    "source": "task-005",
+    "timestamp": "2026-03-06T09:04:20.857Z",
+    "refs": 1,
+    "archived": false
+  },
+  {
+    "content": "PublishManager 新增两个方法：execute_task() 从 TaskStore 加载任务并调用 publish_to_all() 执行发布，retry_task() 用于重试失败的发布任务 [DECISION] execute_task() 支持可选的 platforms 参数来过滤发布平台，retry_task() 内部复用 execute_task() 逻辑以保持代码简洁 [ARCHITECTURE] PublishManager 依赖 TaskStore 获取任务数据，通过 publish_to_all() 统一处理多平台发布逻辑",
+    "source": "task-006",
+    "timestamp": "2026-03-06T09:05:03.476Z",
+    "refs": 1,
+    "archived": false
+  },
+  {
+    "content": "使用BackgroundTasks异步执行发布任务，复用_run_due_jobs辅助函数 [DECISION] execute端点过滤pending+due的jobs，retry端点调用scheduler.replay_failed()重置失败任务 [ARCHITECTURE] 两个端点都通过BackgroundTasks调用_run_due_jobs实现异步执行，保持代码简洁",
+    "source": "task-007",
+    "timestamp": "2026-03-06T09:05:16.993Z",
+    "refs": 1,
+    "archived": false
+  },
+  {
+    "content": "使用 SQLite 存储发布任务和账号信息，支持多平台发布管理 [DECISION] 选择 SQLite 作为轻量级数据库方案，使用参数化查询防止 SQL 注入 [ARCHITECTURE] Database 类封装所有数据库操作，自动初始化表结构，提供完整的 CRUD 接口",
+    "source": "task-002",
+    "timestamp": "2026-03-06T09:05:31.935Z",
+    "refs": 0,
+    "archived": false
+  },
+  {
+    "content": "使用Alpine.js实现响应式交互，复用项目现有Tailwind设计系统 [DECISION] 采用表格布局展示账号列表，表单内联添加以减少页面复杂度 [ARCHITECTURE] 前端通过fetch调用/api/accounts端点进行CRUD操作",
+    "source": "task-016",
+    "timestamp": "2026-03-06T09:05:33.301Z",
+    "refs": 2,
+    "archived": false
+  },
+  {
+    "content": "使用HTMX实现动态数据加载，stats每5秒刷新，queue每3秒刷新 [DECISION] 采用Alpine.js事件系统实现平台筛选，避免页面刷新 [ARCHITECTURE] 前端通过HTMX partials与后端/api/distribute端点通信，保持UI与数据分离",
+    "source": "task-009",
+    "timestamp": "2026-03-06T09:05:35.712Z",
+    "refs": 1,
+    "archived": false
+  },
+  {
+    "content": "使用 TaskStore.list_by_state(TaskState.COMPLETED) 查询已完成任务 [DECISION] 复用现有 TaskResponse 模型，按 created_at 倒序返回",
+    "source": "task-015",
+    "timestamp": "2026-03-06T09:05:51.969Z",
+    "refs": 0,
+    "archived": false
+  },
+  {
+    "content": "使用 JSON 文件存储账号数据 (data/accounts.json) [DECISION] 采用原子写入 (tmp + replace) 防止数据损坏 [ARCHITECTURE] AccountStore 负责持久化，publish router 提供 REST 接口",
+    "source": "task-004",
+    "timestamp": "2026-03-06T09:06:07.592Z",
+    "refs": 1,
+    "archived": false
+  },
+  {
+    "content": "settings.html 包含完整的发布配置区（平台选择、调度参数、内容模板） [DECISION] 采用与翻译配置一致的分组卡片布局和表单交互模式 [ARCHITECTURE] 前端通过 /api/system/settings/publish 端点进行配置的加载和保存",
+    "source": "task-018",
+    "timestamp": "2026-03-06T09:06:12.425Z",
+    "refs": 3,
+    "archived": false
+  },
+  {
+    "content": "账号信息存储在SQLite的accounts表中，包含cookie_path字段 [DECISION] 测试逻辑仅验证cookie文件存在性，保持最小实现",
+    "source": "task-017",
+    "timestamp": "2026-03-06T09:06:27.162Z",
+    "refs": 2,
+    "archived": false
+  },
+  {
+    "content": "状态标签使用图标+颜色区分4种状态(pending/publishing/done/failed) [DECISION] 重试按钮添加loading指示器提升交互反馈，取消按钮仅对pending/publishing状态可见 [ARCHITECTURE] 使用HTMX hx-indicator实现按钮loading状态，hx-confirm实现取消确认",
+    "source": "task-010",
+    "timestamp": "2026-03-06T09:08:43.990Z",
+    "refs": 2,
+    "archived": false
+  },
+  {
+    "content": "使用Alpine.js实现动态数据加载，平台选择后自动获取对应账号 [DECISION] 仅在scope=full时显示这些字段，保持表单简洁 [ARCHITECTURE] 数据流：completedTasks从/api/tasks/completed加载，accounts根据选中平台从/api/accounts?platform=X动态加载",
+    "source": "task-012",
+    "timestamp": "2026-03-06T09:08:48.223Z",
+    "refs": 2,
+    "archived": false
+  },
+  {
+    "content": "选择Alpine.js与HTMX混合架构，HTMX负责自动刷新，Alpine.js负责手动操作 [ARCHITECTURE] publishApp()组件管理全局状态，通过$root访问方法，保持最小化实现",
+    "source": "task-011",
+    "timestamp": "2026-03-06T09:11:57.937Z",
+    "refs": 0,
+    "archived": false
+  },
+  {
+    "content": "表单字段仅在scope=full时显示，使用Alpine.js双向绑定 [DECISION] 封面使用file input + URL.createObjectURL实现即时预览，发布时间使用HTML5 datetime-local控件",
+    "source": "task-013",
+    "timestamp": "2026-03-06T09:28:30.549Z",
+    "refs": 0,
+    "archived": false
+  },
+  {
+    "content": "使用Alpine.js的@submit.prevent拦截scope=full时的表单提交，仅在全流程模式下触发发布API [DECISION] 采用最小化验证策略（仅检查必填项），复用现有showToast反馈机制，成功后重定向到/publish页面",
+    "source": "task-014",
+    "timestamp": "2026-03-06T09:47:24.364Z",
+    "refs": 0,
+    "archived": false
+  },
+  {
+    "content": "创建了 test_publish_e2e.py 测试发布流程（账号创建→任务创建→发布执行→状态验证→重试测试），创建了 conftest.py 共享 live_server fixture [DECISION] 使用 httpx.Client 进行 API 测试而非 Playwright，因为发布流程主要是后端 API 交互 [ARCHITECTURE] E2E 测试分层：conftest.py 提供服务器 fixture，各测试文件专注具体场景",
+    "source": "task-019",
+    "timestamp": "2026-03-06T09:54:50.518Z",
+    "refs": 0,
+    "archived": false
+  }
+]

@@ -173,3 +173,89 @@ async def replay_failed_publish(request: ReplayRequest, background_tasks: Backgr
         "platform": request.platform or "all",
         "product_type": request.product_type or "all",
     }
+
+
+@router.get("/stats")
+async def get_publish_stats():
+    """获取发布统计信息"""
+    scheduler = get_scheduler()
+    status_count = scheduler.get_queue_status()
+
+    platform_stats = {}
+    for job in scheduler._queue:
+        if job.platform not in platform_stats:
+            platform_stats[job.platform] = {"pending": 0, "publishing": 0, "done": 0, "failed": 0}
+        platform_stats[job.platform][job.status] = platform_stats[job.platform].get(job.status, 0) + 1
+
+    return {
+        "total": sum(status_count.values()),
+        "by_status": status_count,
+        "by_platform": platform_stats,
+    }
+
+
+@router.post("/tasks/{task_id}/execute")
+async def execute_publish_task(task_id: str, background_tasks: BackgroundTasks):
+    """立即执行指定任务的发布作业"""
+    scheduler = get_scheduler()
+    task_jobs = [j for j in scheduler._queue if j.task_id == task_id and j.status == "pending" and j.is_due()]
+
+    if not task_jobs:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NO_PENDING_JOBS", "message": "没有待执行的发布任务"}
+        )
+
+    background_tasks.add_task(_run_due_jobs, scheduler)
+
+    return {
+        "message": "发布任务已加入执行队列",
+        "task_id": task_id,
+        "jobs_count": len(task_jobs),
+    }
+
+
+@router.post("/tasks/{task_id}/retry")
+async def retry_publish_task(task_id: str, background_tasks: BackgroundTasks):
+    """重试指定任务的失败发布作业"""
+    scheduler = get_scheduler()
+    replayed = scheduler.replay_failed(task_id=task_id)
+
+    if replayed == 0:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NO_FAILED_JOBS", "message": "没有失败的发布任务"}
+        )
+
+    background_tasks.add_task(_run_due_jobs, scheduler)
+
+    return {
+        "message": "失败任务已重置并加入执行队列",
+        "task_id": task_id,
+        "replayed_jobs": replayed,
+    }
+
+
+class CancelRequest(BaseModel):
+    """取消发布任务"""
+    task_id: str
+    platform: str = ""
+
+
+@router.post("/cancel")
+async def cancel_publish_job(request: CancelRequest):
+    """取消待发布或发布中的任务"""
+    scheduler = get_scheduler()
+    cancelled = 0
+
+    for job in scheduler._queue:
+        if job.task_id == request.task_id and job.status in ("pending", "publishing"):
+            if not request.platform or job.platform == request.platform:
+                job.status = "failed"
+                job.error = "用户取消"
+                cancelled += 1
+
+    if cancelled == 0:
+        raise HTTPException(status_code=404, detail={"code": "NO_JOBS", "message": "没有可取消的任务"})
+
+    return {"message": "任务已取消", "cancelled": cancelled}

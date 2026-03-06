@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -31,7 +32,7 @@ class RouterSuccess:
     def is_router_enabled(self) -> bool:
         return True
 
-    async def transcribe(self, *, video_url: str, video_path: str | None, source_lang: str):
+    async def transcribe(self, *, video_url: str, video_path: Optional[str], source_lang: str):
         del video_url, video_path, source_lang
         return ASRResult(
             srt_content=(
@@ -49,7 +50,7 @@ class RouterFail:
     def is_router_enabled(self) -> bool:
         return True
 
-    async def transcribe(self, *, video_url: str, video_path: str | None, source_lang: str):
+    async def transcribe(self, *, video_url: str, video_path: Optional[str], source_lang: str):
         del video_url, video_path, source_lang
         raise RuntimeError("router failed")
 

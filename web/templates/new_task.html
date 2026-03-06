@@ -26,7 +26,7 @@
 
         <!-- Single Mode -->
         <div x-show="mode === 'single'" x-transition>
-            <form hx-post="/api/tasks/create" hx-swap="none"
+            <form @submit.prevent="scope === 'full' ? submitPublishTask($event) : null" hx-post="/api/tasks/create" hx-swap="none"
                   hx-on::after-request="if(event.detail.successful) { showToast('任务创建成功，等待 Worker 处理', 'success'); setTimeout(function(){location.href='/tasks'},800); }">
 
                 <div class="space-y-5">
@@ -93,6 +93,93 @@
                             </label>
                         </div>
                     </div>
+
+                    <!-- 视频选择 -->
+                    <div x-show="scope === 'full'" x-transition x-cloak>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">选择已完成的视频</label>
+                        <select name="completed_task_id" x-model="selectedVideo" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none">
+                            <option value="">从已完成任务中选择...</option>
+                            <template x-for="task in completedTasks" :key="task.id">
+                                <option :value="task.id" x-text="task.title"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- 平台选择 -->
+                    <div x-show="scope === 'full'" x-transition x-cloak>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">发布平台</label>
+                        <div class="flex flex-wrap gap-2">
+                            <template x-for="platform in platforms" :key="platform.value">
+                                <label class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border text-[13px] cursor-pointer hover:bg-muted transition has-[:checked]:bg-fg-strong has-[:checked]:text-white has-[:checked]:border-fg-strong">
+                                    <input type="checkbox" :value="platform.value" @change="onPlatformChange" class="sr-only" />
+                                    <span x-text="platform.label"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- 账号选择 -->
+                    <div x-show="scope === 'full' && selectedPlatforms.length > 0" x-transition x-cloak>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">选择账号</label>
+                        <template x-for="platform in selectedPlatforms" :key="platform">
+                            <div class="mb-3">
+                                <label class="block text-[12px] text-fg-sub mb-1" x-text="platforms.find(p => p.value === platform)?.label"></label>
+                                <select :name="'account_' + platform" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none">
+                                    <option value="">选择账号...</option>
+                                    <template x-for="account in accountsByPlatform[platform] || []" :key="account.id">
+                                        <option :value="account.id" x-text="account.name"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- 发布信息 -->
+                    <div x-show="scope === 'full'" x-transition x-cloak>
+                        <div class="space-y-4">
+                            <!-- 标题 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">发布标题 <span class="text-red-500">*</span></label>
+                                <input type="text" name="publish_title" x-model="publishTitle" required
+                                       placeholder="输入视频标题"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition" />
+                            </div>
+
+                            <!-- 描述 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">视频描述</label>
+                                <textarea name="publish_description" x-model="publishDescription" rows="4"
+                                          placeholder="输入视频描述（可选）"
+                                          class="w-full px-4 py-3 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition resize-none"></textarea>
+
+                            <!-- 标签 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">标签</label>
+                                <input type="text" name="publish_tags" x-model="publishTags"
+                                       placeholder="用逗号分隔，如：科技,AI,教程"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition" />
+                            </div>
+
+                            <!-- 封面 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">封面图片</label>
+                                <input type="file" name="publish_cover" accept="image/*" @change="onCoverChange"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong file:mr-4 file:py-1 file:px-3 file:rounded-xl file:border-0 file:text-[13px] file:bg-muted file:text-fg-strong hover:file:bg-muted-dark cursor-pointer" />
+                                <div x-show="coverPreview" x-cloak class="mt-2">
+                                    <img :src="coverPreview" class="w-32 h-32 object-cover rounded-xl border border-border" />
+                                </div>
+                            </div>
+
+                            <!-- 发布时间 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">发布时间</label>
+                                <input type="datetime-local" name="publish_time" x-model="publishTime"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none focus:border-fg-sub transition" />
+                                <p class="text-[11px] text-fg-sub mt-1">留空则立即发布</p>
+                            </div>
+                        </div>
+                    </div>
+                            </div>
 
                     <!-- 字幕样式 -->
                     <div class="rounded-2xl border border-border px-4 py-4">
@@ -298,6 +385,22 @@ function vfTaskForm() {
         previewUrl: '',
         previewError: '',
         previewDebug: null,
+        completedTasks: [],
+        selectedVideo: '',
+        platforms: [
+            { value: 'bilibili', label: 'B站' },
+            { value: 'douyin', label: '抖音' },
+            { value: 'xiaohongshu', label: '小红书' },
+            { value: 'youtube', label: 'YouTube' },
+            { value: 'weixin', label: '视频号' }
+        ],
+        selectedPlatforms: [],
+        accountsByPlatform: {},
+        publishTitle: "",
+        publishDescription: "",
+        publishTags: "",
+        publishTime: "",
+        coverPreview: null,
         style: {
             cn_font_size: 26,
             en_font_size: 20,
@@ -314,9 +417,38 @@ function vfTaskForm() {
                 if (payload && payload.subtitle_style) {
                     this.style = Object.assign({}, this.style, payload.subtitle_style);
                 }
-            } catch (_) {
-                // 忽略默认值加载错误，使用内置默认配置
+            } catch (_) {}
+            await this.loadCompletedTasks();
+        },
+        async loadCompletedTasks() {
+        },
+            try {
+                const resp = await fetch('/api/tasks/completed');
+                if (resp.ok) {
+                    this.completedTasks = await resp.json();
+                }
+            } catch (_) {}
+        },
+        async onPlatformChange(e) {
+            const platform = e.target.value;
+            if (e.target.checked) {
+                this.selectedPlatforms.push(platform);
+                await this.loadAccounts(platform);
+            } else {
+                this.selectedPlatforms = this.selectedPlatforms.filter(p => p !== platform);
             }
+        },
+        async loadAccounts(platform) {
+            try {
+                const resp = await fetch(`/api/accounts?platform=${platform}`);
+                if (resp.ok) {
+                    this.accountsByPlatform[platform] = await resp.json();
+                }
+            } catch (_) {}
+        },
+        onCoverChange(e) {
+            const file = e.target.files[0];
+            if (file) this.coverPreview = URL.createObjectURL(file);
         },
         async previewSubtitle() {
             this.previewError = '';
@@ -364,6 +496,41 @@ function vfTaskForm() {
                 showToast(this.previewError, 'error');
             } finally {
                 this.previewLoading = false;
+            }
+        }
+        },
+        async submitPublishTask(e) {
+            if (!this.selectedVideo) {
+                showToast('请选择已完成的视频', 'error');
+                return;
+            }
+            if (this.selectedPlatforms.length === 0) {
+                showToast('请至少选择一个发布平台', 'error');
+                return;
+            }
+            if (!this.publishTitle.trim()) {
+                showToast('请输入发布标题', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/distribute/publish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        task_id: this.selectedVideo,
+                        platforms: this.selectedPlatforms,
+                        mode: 'immediate'
+                    })
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    showToast(err.detail?.message || '发布失败', 'error');
+                    return;
+                }
+                showToast('发布任务已创建', 'success');
+                setTimeout(() => location.href = '/publish', 800);
+            } catch (err) {
+                showToast('请求失败', 'error');
             }
         }
     };

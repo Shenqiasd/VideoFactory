@@ -23,6 +23,7 @@ from api.routes.factory import router as factory_router
 from api.routes.distribute import router as distribute_router
 from api.routes.system import router as system_router
 from api.routes.pages import router as pages_router
+from api.routes.publish import router as publish_router
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ app.include_router(tasks_router, prefix="/api/tasks", tags=["任务管理"])
 app.include_router(production_router, prefix="/api/production", tags=["生产管线"])
 app.include_router(factory_router, prefix="/api/factory", tags=["加工管线"])
 app.include_router(distribute_router, prefix="/api/distribute", tags=["分发管线"])
+app.include_router(publish_router, prefix="/api/publish", tags=["发布账号"])
 app.include_router(system_router, prefix="/api/system", tags=["系统"])
 
 

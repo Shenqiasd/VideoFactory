@@ -637,6 +637,33 @@ async def get_stats():
     )
 
 
+@router.get("/completed", response_model=List[TaskResponse])
+async def list_completed_tasks():
+    """列出已完成的任务"""
+    store = get_task_store()
+    tasks = store.list_by_state(TaskState.COMPLETED)
+    tasks = sorted(tasks, key=lambda t: t.created_at, reverse=True)
+
+    return [
+        TaskResponse(
+            task_id=t.task_id,
+            source_url=t.source_url,
+            source_title=t.source_title,
+            state=t.state,
+            progress=t.progress,
+            error_message=t.error_message,
+            last_error_code=t.last_error_code,
+            last_step=t.last_step,
+            task_scope=getattr(t, "task_scope", "full"),
+            subtitle_style=getattr(t, "subtitle_style", {}) or {},
+            created_at=t.created_at,
+            updated_at=t.updated_at,
+            products_count=len(t.products),
+        )
+        for t in tasks
+    ]
+
+
 @router.post("/subtitle-style/preview")
 async def create_subtitle_style_preview(request: SubtitlePreviewRequest):
     """
