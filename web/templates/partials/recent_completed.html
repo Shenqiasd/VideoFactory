@@ -1,0 +1,39 @@
+{% if tasks|length == 0 %}
+<div class="py-8 text-center text-[14px] text-fg-sub">暂无已完成任务</div>
+{% else %}
+<table class="w-full text-[14px]">
+    <thead>
+        <tr class="border-b border-border text-left">
+            <th class="pb-2 text-[12px] font-medium text-fg-sub">任务</th>
+            <th class="pb-2 text-[12px] font-medium text-fg-sub">完成时间</th>
+            <th class="pb-2 text-[12px] font-medium text-fg-sub">耗时</th>
+            <th class="pb-2 text-[12px] font-medium text-fg-sub">产出</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for task in tasks %}
+        <tr class="border-b border-border last:border-0 hover:bg-muted/50 transition cursor-pointer" onclick="location.href='/tasks/{{ task.task_id }}'">
+            <td class="py-3">
+                <div class="text-[14px] font-medium text-fg-strong truncate max-w-[300px]">{{ task.original_title or '未命名' }}</div>
+                <div class="text-[12px] text-fg-faint font-mono">{{ task.task_id[:8] }}</div>
+            </td>
+            <td class="py-3 text-[13px] text-fg-sub">{{ task.completed_at }}</td>
+            <td class="py-3 text-[13px] text-fg-sub font-mono">{{ task.duration }}</td>
+            <td class="py-3">
+                <div class="flex gap-1.5">
+                    {% if task.has_long_video %}
+                    <span class="px-2 py-0.5 rounded-lg bg-muted text-[11px] text-fg">长视频</span>
+                    {% endif %}
+                    {% if task.has_clips %}
+                    <span class="px-2 py-0.5 rounded-lg bg-muted text-[11px] text-fg">{{ task.clips_count }}切片</span>
+                    {% endif %}
+                    {% if task.has_article %}
+                    <span class="px-2 py-0.5 rounded-lg bg-muted text-[11px] text-fg">文章</span>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}

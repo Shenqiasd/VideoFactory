@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}存储管理 - 视频工厂{% endblock %}
+{% block nav_storage %}active{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-[21px] font-bold text-fg-strong">存储管理</h1>
+    <p class="text-[14px] text-fg-sub mt-1">R2 云存储和本地存储的文件管理</p>
+</div>
+
+<!-- Storage Cards -->
+<div class="grid grid-cols-2 gap-5 mb-6">
+    <!-- R2 -->
+    <div class="rounded-3xl border border-border p-6 shadow-card">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-[15px] font-semibold text-fg-strong">R2 云存储</h2>
+            <i data-lucide="cloud" class="w-[18px] h-[18px] text-fg-faint"></i>
+        </div>
+        <div hx-get="/web/partials/storage_overview" hx-trigger="load, every 30s" hx-swap="innerHTML" hx-target="this">
+            <div class="h-20 rounded-xl bg-muted animate-pulse"></div>
+        </div>
+    </div>
+
+    <!-- Local -->
+    <div class="rounded-3xl border border-border p-6 shadow-card">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-[15px] font-semibold text-fg-strong">本地存储</h2>
+            <i data-lucide="hard-drive" class="w-[18px] h-[18px] text-fg-faint"></i>
+        </div>
+        <div class="space-y-3">
+            <div>
+                <div class="flex justify-between text-[12px] mb-1.5">
+                    <span class="text-fg-sub">磁盘使用</span>
+                    <span class="text-fg-strong font-mono">—</span>
+                </div>
+                <div class="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div class="h-full bg-fg-faint rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- File Browser -->
+<div class="rounded-3xl border border-border shadow-card overflow-hidden">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between">
+        <div class="flex items-center gap-2 text-[13px] text-fg-sub">
+            <span class="text-fg-strong font-medium">r2:videoflow</span>
+            <span>/</span>
+            <span>processed</span>
+        </div>
+        <button class="h-8 px-3 rounded-xl border-2 border-border text-[12px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5 inline mr-1"></i>
+            刷新
+        </button>
+    </div>
+    <table class="w-full text-[14px]">
+        <thead>
+            <tr class="border-b border-border text-left">
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">名称</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">大小</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">修改时间</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td colspan="4" class="px-6 py-16 text-center text-fg-sub text-[14px]">
+                    暂无文件
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

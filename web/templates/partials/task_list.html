@@ -1,0 +1,97 @@
+{% if tasks|length == 0 %}
+<div class="py-16 text-center">
+    <div class="text-fg-faint mb-2">
+        <i data-lucide="inbox" class="w-10 h-10 mx-auto"></i>
+    </div>
+    <p class="text-[14px] text-fg-sub">暂无任务</p>
+    <p class="text-[12px] text-fg-faint mt-1">点击"新建任务"开始</p>
+</div>
+{% else %}
+<div class="space-y-2">
+    {% for task in tasks %}
+    <a href="/tasks/{{ task.task_id }}"
+       class="flex items-center gap-4 px-4 py-3.5 rounded-2xl hover:bg-muted transition cursor-pointer group">
+
+        <!-- Initial Badge -->
+        <div class="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-[14px] font-semibold text-fg-strong flex-shrink-0">
+            {{ task.initial }}
+        </div>
+
+        <!-- Task Info -->
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+                <span class="text-[14px] font-medium text-fg-strong truncate">{{ task.title }}</span>
+            </div>
+            <div class="flex items-center gap-2 mt-0.5 text-[12px] text-fg-faint">
+                <span class="font-mono">{{ task.task_id[:8] }}</span>
+                {% if task.scope_label %}
+                <span>·</span>
+                <span class="px-1.5 py-0.5 rounded-md bg-muted text-[10px] text-fg font-medium">{{ task.scope_label }}</span>
+                {% endif %}
+                <span>·</span>
+                <span>{{ task.created_at }}</span>
+                {% if task.platforms %}
+                <span>·</span>
+                {% for platform in task.platforms %}
+                <span>{{ platform }}</span>
+                {% endfor %}
+                {% endif %}
+            </div>
+
+            <!-- Progress Bar (if active) -->
+            {% if task.is_active %}
+            <div class="mt-2 flex items-center gap-3">
+                <div class="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div class="h-full bg-fg-strong rounded-full task-progress" style="width: {{ task.progress }}%"></div>
+                </div>
+                <span class="text-[11px] text-fg-faint font-mono flex-shrink-0">{{ task.progress }}%</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Status -->
+        <div class="flex flex-col items-end gap-1 flex-shrink-0">
+            {% if task.state == 'completed' %}
+            <span class="px-2.5 py-0.5 rounded-lg bg-green-50 text-green-600 text-[11px] font-medium">已完成</span>
+            {% elif task.state == 'failed' %}
+            <span class="px-2.5 py-0.5 rounded-lg bg-red-50 text-red-600 text-[11px] font-medium">失败</span>
+            {% else %}
+            <span class="px-2.5 py-0.5 rounded-lg bg-muted text-fg text-[11px] font-medium">{{ task.status_text }}</span>
+            {% endif %}
+
+            {% if task.is_active and task.elapsed_time %}
+            <span class="text-[11px] text-fg-faint">{{ task.elapsed_time }}</span>
+            {% endif %}
+        </div>
+
+        <!-- Actions (three-dot menu) -->
+        <div class="flex-shrink-0 opacity-0 group-hover:opacity-100 transition" x-data="{ open: false }">
+            <button @click.prevent="open = !open" class="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white text-fg-sub">
+                <i data-lucide="more-vertical" class="w-4 h-4"></i>
+            </button>
+            <div x-show="open" @click.away="open = false" x-transition
+                 class="absolute right-0 mt-1 w-36 bg-white border border-border rounded-xl shadow-card py-1 z-20">
+                <a href="/tasks/{{ task.task_id }}" class="block px-3 py-1.5 text-[13px] text-fg hover:bg-muted transition">查看详情</a>
+                {% if task.state == 'completed' %}
+                <a href="/tasks/{{ task.task_id }}#artifact-list" class="block px-3 py-1.5 text-[13px] text-fg hover:bg-muted transition">下载产物</a>
+                {% endif %}
+                {% if task.can_retry %}
+                <button hx-post="/api/tasks/{{ task.task_id }}/retry" hx-swap="none"
+                        @click.prevent
+                        class="block w-full text-left px-3 py-1.5 text-[13px] text-fg hover:bg-muted transition">重试</button>
+                {% endif %}
+                {% if task.can_cancel %}
+                <button hx-post="/api/tasks/{{ task.task_id }}/cancel" hx-confirm="确定取消？" hx-swap="none"
+                        @click.prevent
+                        class="block w-full text-left px-3 py-1.5 text-[13px] text-red-500 hover:bg-red-50 transition">取消</button>
+                {% endif %}
+                <button hx-delete="/api/tasks/{{ task.task_id }}" hx-confirm="确定删除任务？此操作不可恢复。" hx-swap="none"
+                        hx-on::after-request="if(event.detail.successful){htmx.ajax('GET','/web/partials/task_list',{target:'#task-list-container',swap:'innerHTML'});showToast('任务已删除','success');}"
+                        @click.prevent
+                        class="block w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50 transition">删除任务</button>
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% endif %}

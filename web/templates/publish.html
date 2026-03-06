@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}发布管理 - 视频工厂{% endblock %}
+{% block nav_publish %}active{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-[21px] font-bold text-fg-strong">发布管理</h1>
+    <p class="text-[14px] text-fg-sub mt-1">监控多平台内容发布队列和状态</p>
+</div>
+
+<!-- Stats -->
+<div class="grid grid-cols-4 gap-4 mb-6">
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">待发布</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">0</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">发布中</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">0</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">今日成功</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">0</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">失败</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">0</div>
+    </div>
+</div>
+
+<!-- Platform Filter -->
+<div class="flex gap-1 p-1 bg-muted rounded-2xl mb-5 w-fit" x-data="{ tab: 'all' }">
+    {% for val, label in [('all','全部'), ('bilibili','B站'), ('douyin','抖音'), ('xiaohongshu','小红书'), ('youtube','YouTube'), ('weixin','视频号')] %}
+    <button @click="tab = '{{ val }}'"
+            :class="tab === '{{ val }}' ? 'bg-white shadow-md text-fg-strong font-semibold' : 'text-fg-sub hover:text-fg hover:bg-white/40'"
+            class="px-3 py-1.5 rounded-xl text-[13px] transition">
+        {{ label }}
+    </button>
+    {% endfor %}
+</div>
+
+<!-- Queue Table -->
+<div class="rounded-3xl border border-border shadow-card overflow-hidden">
+    <table class="w-full text-[14px]">
+        <thead>
+            <tr class="border-b border-border text-left">
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">任务</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">平台</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">类型</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">计划时间</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">状态</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td colspan="6" class="px-6 py-16 text-center text-fg-sub text-[14px]">
+                    暂无发布任务
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

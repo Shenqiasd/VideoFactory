@@ -1,0 +1,16 @@
+<div class="space-y-2.5">
+    {% for service in services %}
+    <div class="flex items-center justify-between text-[13px]">
+        <div class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full {{ 'bg-green-500' if service.healthy else 'bg-red-400' }}"></span>
+            <span class="text-fg">{{ service.name }}</span>
+        </div>
+        <span class="text-[12px] font-mono {{ 'text-fg-sub' if service.healthy else 'text-red-500' }}">
+            {{ '正常' if service.healthy else '离线' }}
+        </span>
+    </div>
+    {% endfor %}
+</div>
+<div class="mt-3 pt-3 border-t border-border text-[11px] text-fg-faint text-center">
+    最后检查 {{ last_check_time }}
+</div>

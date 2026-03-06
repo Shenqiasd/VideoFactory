@@ -1,0 +1,49 @@
+# VideoFactory 配置模板
+# 复制此文件为 settings.yaml 并填入实际配置
+
+# KlicStudio配置
+klicstudio:
+  base_url: "http://127.0.0.1:8888"
+  timeout: 3600
+
+# LLM配置
+llm:
+  base_url: "https://api.groq.com/openai/v1"
+  api_key: "YOUR_API_KEY_HERE"
+  model: "llama-3.3-70b-versatile"
+
+# ASR配置
+asr:
+  provider: auto
+  youtube:
+    enabled: true
+  whisper:
+    enabled: true
+    base_url: "http://127.0.0.1:8866/v1"
+  volcengine:
+    enabled: false
+    app_id: "YOUR_APP_ID"
+    token: "YOUR_TOKEN"
+
+# TTS配置
+tts:
+  provider: "klicstudio"
+  volcengine:
+    enabled: false
+    app_id: "YOUR_APP_ID"
+    token: "YOUR_TOKEN"
+
+# 存储配置
+storage:
+  r2:
+    bucket: "videoflow"
+    rclone_remote: "r2"
+  local:
+    working_dir: "~/.video-factory/working"
+    output_dir: "~/.video-factory/output"
+
+# 发布配置
+distribute:
+  auto_publish: false
+  social_auto_upload_path: ""
+  account_dir: ""

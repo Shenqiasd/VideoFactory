@@ -1,0 +1,790 @@
+{% extends "base.html" %}
+{% block title %}设置 - 视频工厂{% endblock %}
+{% block nav_settings %}active{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-[21px] font-bold text-fg-strong">设置</h1>
+    <p class="text-[14px] text-fg-sub mt-1">配置翻译、存储、发布等系统参数</p>
+</div>
+
+<div class="grid grid-cols-4 gap-5" x-data="{ active: 'translation' }">
+    <!-- Side Nav -->
+    <div class="col-span-1">
+        <nav class="space-y-0.5">
+            {% for key, label in [('translation','翻译配置'), ('storage','存储配置'), ('publish','发布配置'), ('notification','通知配置'), ('system','系统')] %}
+            <button @click="active = '{{ key }}'"
+                    :class="active === '{{ key }}' ? 'bg-muted-dark text-fg-strong font-semibold shadow-sm' : 'text-fg-sub hover:text-fg hover:bg-muted'"
+                    class="w-full text-left px-3 py-2 rounded-xl text-[14px] transition">
+                {{ label }}
+            </button>
+            {% endfor %}
+        </nav>
+    </div>
+
+    <!-- Content -->
+    <div class="col-span-3">
+        <div class="rounded-3xl border border-border p-6 shadow-card">
+
+            <!-- Translation -->
+            <div x-show="active === 'translation'" x-transition>
+                <h2 class="text-[15px] font-semibold text-fg-strong mb-5">翻译配置</h2>
+                <div class="space-y-4">
+                    <div class="rounded-2xl border border-border p-4 space-y-3">
+                        <h3 class="text-[13px] font-semibold text-fg-strong">翻译 Provider 配置</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">翻译引擎</label>
+                                <select id="translation-provider" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none">
+                                    <option value="llm">llm（现有）</option>
+                                    <option value="volcengine_ark">volcengine_ark（豆包翻译）</option>
+                                </select>
+                            </div>
+                            <label class="flex items-center justify-between rounded-xl border border-border px-3 py-2 cursor-pointer">
+                                <span class="text-[13px] text-fg">启用火山方舟翻译</span>
+                                <input id="translation-volcengine-enabled" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                            </label>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">Ark Base URL</label>
+                                <input id="translation-volcengine-base-url" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">Ark API Key</label>
+                                <input id="translation-volcengine-api-key" type="password"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">Model / Endpoint ID</label>
+                                <input id="translation-volcengine-model" type="text" placeholder="doubao-seed-translation"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">timeout（秒）</label>
+                                <input id="translation-volcengine-timeout" type="number" min="1"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="rounded-xl bg-muted p-3 space-y-2">
+                            <div class="grid grid-cols-3 gap-2">
+                                <input id="translation-test-source-lang" type="text" value="en"
+                                       class="h-9 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none" />
+                                <input id="translation-test-target-lang" type="text" value="zh-CN"
+                                       class="h-9 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none" />
+                                <button type="button" onclick="testTranslation()"
+                                        class="h-9 px-4 rounded-xl bg-black text-white text-[12px] font-semibold hover:bg-fg-strong transition">测试翻译</button>
+                            </div>
+                            <input id="translation-test-text" type="text" value="Hello world, this is a translation test."
+                                   class="w-full h-9 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none" />
+                            <div id="translation-test-result-box" class="hidden rounded-xl bg-white border border-border px-3 py-2">
+                                <p class="text-[11px] text-fg-sub">翻译结果</p>
+                                <p id="translation-test-result-text" class="text-[13px] text-fg-strong mt-0.5 break-all"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-border bg-muted/40 p-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">ASR 路由模式</label>
+                                <select id="asr-provider" class="w-full h-10 px-4 rounded-2xl border border-border bg-white text-[14px] text-fg-strong outline-none">
+                                    <option value="auto">auto（按顺序降级）</option>
+                                    <option value="youtube">youtube（仅字幕抓取）</option>
+                                    <option value="volcengine">volcengine</option>
+                                    <option value="whisper">whisper</option>
+                                    <option value="klicstudio">klicstudio（原流程）</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">TTS 提供方</label>
+                                <select id="tts-provider" class="w-full h-10 px-4 rounded-2xl border border-border bg-white text-[14px] text-fg-strong outline-none">
+                                    <option value="klicstudio">klicstudio</option>
+                                    <option value="volcengine">volcengine</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">ASR 降级顺序</label>
+                                <input id="asr-fallback-order" type="text" placeholder="youtube,volcengine,whisper"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border bg-white text-[14px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">TTS 降级顺序</label>
+                                <input id="tts-fallback-order" type="text" placeholder="volcengine,klicstudio"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border bg-white text-[14px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <label class="flex items-center justify-between rounded-xl border border-border bg-white px-3 py-2 cursor-pointer">
+                                <span class="text-[13px] text-fg">允许 ASR 自动降级</span>
+                                <input id="asr-allow-fallback" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                            </label>
+                            <label class="flex items-center justify-between rounded-xl border border-border bg-white px-3 py-2 cursor-pointer">
+                                <span class="text-[13px] text-fg">允许回退 KlicStudio</span>
+                                <input id="asr-allow-klic-fallback" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                            </label>
+                            <label class="flex items-center justify-between rounded-xl border border-border bg-white px-3 py-2 cursor-pointer">
+                                <span class="text-[13px] text-fg">TTS 任务也走 ASR 路由</span>
+                                <input id="asr-allow-router-with-tts" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                            </label>
+                            <label class="flex items-center justify-between rounded-xl border border-border bg-white px-3 py-2 cursor-pointer">
+                                <span class="text-[13px] text-fg">YouTube 模式跳过下载</span>
+                                <input id="asr-youtube-skip-download" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                            </label>
+                        </div>
+                        <div>
+                            <label class="block text-[13px] font-medium text-fg-strong mb-1.5">YouTube 语言优先级</label>
+                            <input id="asr-youtube-preferred-langs" type="text" placeholder="en,en-US,en-GB"
+                                   class="w-full h-10 px-4 rounded-2xl border border-border bg-white text-[14px] text-fg-strong outline-none" />
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-border p-4 space-y-3">
+                        <h3 class="text-[13px] font-semibold text-fg-strong">Whisper 配置</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">base_url</label>
+                                <input id="asr-whisper-base-url" type="text" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">model</label>
+                                <input id="asr-whisper-model" type="text" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[12px] text-fg-sub mb-1.5">timeout（秒）</label>
+                            <input id="asr-whisper-timeout" type="number" min="1" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-border p-4 space-y-3">
+                        <h3 class="text-[13px] font-semibold text-fg-strong">火山 ASR 配置</h3>
+                        <label class="flex items-center justify-between rounded-xl border border-border px-3 py-2 cursor-pointer">
+                            <span class="text-[13px] text-fg">启用火山 ASR</span>
+                            <input id="asr-volcengine-enabled" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                        </label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">app_id</label>
+                                <input id="asr-volcengine-app-id" type="text" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">token</label>
+                                <input id="asr-volcengine-token" type="password" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">http_url（可选）</label>
+                                <input id="asr-volcengine-http-url" type="text" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">ws_url</label>
+                                <input id="asr-volcengine-ws-url" type="text" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[12px] text-fg-sub mb-1.5">timeout（秒）</label>
+                            <input id="asr-volcengine-timeout" type="number" min="1" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-border p-4 space-y-3">
+                        <h3 class="text-[13px] font-semibold text-fg-strong">火山 TTS 配置</h3>
+                        <label class="flex items-center justify-between rounded-xl border border-border px-3 py-2 cursor-pointer">
+                            <span class="text-[13px] text-fg">启用火山 TTS</span>
+                            <input id="tts-volcengine-enabled" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                        </label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">appid</label>
+                                <input id="tts-volcengine-app-id" type="text" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">access_token</label>
+                                <input id="tts-volcengine-token" type="password" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">cluster</label>
+                                <input id="tts-volcengine-cluster" type="text" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">resource_id</label>
+                                <input id="tts-volcengine-resource-id" type="text" placeholder="seed-tts-1.0"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">api_url</label>
+                                <input id="tts-volcengine-api-url" type="text" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">sample_rate</label>
+                                <input id="tts-volcengine-sample-rate" type="number" min="8000" step="1"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">默认音色</label>
+                                <select id="tts-volcengine-default-voice" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none"></select>
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">timeout（秒）</label>
+                                <input id="tts-volcengine-timeout" type="number" min="1" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="rounded-xl bg-muted p-3 space-y-2">
+                            <div class="grid grid-cols-3 gap-2">
+                                <select id="tts-test-voice" class="h-9 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none"></select>
+                                <input id="tts-test-text" type="text" value="你好，这是火山语音合成测试。"
+                                       class="h-9 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none col-span-2" />
+                            </div>
+                            <button type="button" onclick="testTTS()"
+                                    class="w-full h-9 rounded-xl bg-black text-white text-[12px] font-semibold hover:bg-fg-strong transition">测试语音合成</button>
+                            <div id="tts-test-result-box" class="hidden rounded-xl bg-white border border-border px-3 py-2">
+                                <audio id="tts-test-audio" controls class="w-full"></audio>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-border p-4 space-y-3"
+                         hx-get="/api/system/settings/youtube-cookies"
+                         hx-trigger="load"
+                         hx-swap="none"
+                         hx-on::after-request="if(event.detail.successful && event.detail.xhr.response) { const data = JSON.parse(event.detail.xhr.response); if(data.exists) { document.getElementById('youtube-cookies').value = data.cookies; } }">
+                        <h3 class="text-[13px] font-semibold text-fg-strong">YouTube Cookies</h3>
+                        <p class="text-[12px] text-fg-sub">解决 YouTube bot 验证问题，粘贴浏览器导出的 cookies.txt 内容。</p>
+                        <textarea id="youtube-cookies"
+                                  placeholder="# Netscape HTTP Cookie File&#10;# 粘贴从浏览器导出的 cookies.txt 内容..."
+                                  class="w-full h-32 px-4 py-3 rounded-2xl border border-border text-[13px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition font-mono resize-y"></textarea>
+                        <div class="flex items-center justify-between">
+                            <a href="https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
+                               target="_blank"
+                               class="text-[12px] text-fg-sub hover:text-fg-strong transition flex items-center gap-1">
+                                <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                                如何导出浏览器 Cookies
+                            </a>
+                            <button type="button"
+                                    hx-post="/api/system/settings/youtube-cookies"
+                                    hx-vals='js:{cookies: document.getElementById("youtube-cookies").value}'
+                                    hx-swap="none"
+                                    hx-on::after-request="if(event.detail.successful) { showToast('YouTube Cookies 已保存', 'success'); } else { showToast('保存失败', 'error'); }"
+                                    class="h-8 px-4 rounded-2xl bg-black text-white text-[12px] font-semibold hover:bg-fg-strong shadow-btn transition">保存 Cookies</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-8">
+                    <button type="button"
+                            onclick="resetAsrTtsForm()"
+                            class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">重置</button>
+                    <button type="button"
+                            onclick="saveAsrTtsSettings()"
+                            class="h-9 px-5 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong shadow-btn transition">保存翻译配置</button>
+                </div>
+            </div>
+
+            <!-- Storage -->
+            <div x-show="active === 'storage'" x-transition x-cloak>
+                <h2 class="text-[15px] font-semibold text-fg-strong mb-5">存储配置</h2>
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">R2 Bucket</label>
+                        <input type="text" value="videoflow" readonly class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-sub bg-muted outline-none" />
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">本地存储路径</label>
+                        <input type="text" value="/Users/enesource/.video-factory/storage" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none" />
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">自动清理策略</label>
+                        <select class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none">
+                            <option>保留 30 天</option>
+                            <option>保留 60 天</option>
+                            <option>保留 90 天</option>
+                            <option>永不清理</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-8">
+                    <button class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">重置</button>
+                    <button class="h-9 px-5 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong shadow-btn transition">保存</button>
+                </div>
+            </div>
+
+            <!-- Publish -->
+            <div x-show="active === 'publish'" x-transition x-cloak>
+                <h2 class="text-[15px] font-semibold text-fg-strong mb-5">发布配置</h2>
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-2">默认平台</label>
+                        <div class="flex flex-wrap gap-2">
+                            {% for val, label in [('bilibili','B站'), ('douyin','抖音'), ('xiaohongshu','小红书'), ('youtube','YouTube')] %}
+                            <label class="inline-flex items-center px-3 py-1.5 rounded-xl border border-border text-[13px] cursor-pointer hover:bg-muted transition has-[:checked]:bg-fg-strong has-[:checked]:text-white has-[:checked]:border-fg-strong">
+                                <input type="checkbox" class="sr-only" />
+                                {{ label }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">发布间隔（秒）</label>
+                        <input type="number" value="300" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none" />
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">最大重试次数</label>
+                        <input type="number" value="3" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none" />
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-8">
+                    <button class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">重置</button>
+                    <button class="h-9 px-5 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong shadow-btn transition">保存</button>
+                </div>
+            </div>
+
+            <!-- Notification -->
+            <div x-show="active === 'notification'" x-transition x-cloak>
+                <h2 class="text-[15px] font-semibold text-fg-strong mb-5">通知配置</h2>
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">飞书 Webhook URL</label>
+                        <input type="url" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                               class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none" />
+                    </div>
+                    <div class="h-px bg-border"></div>
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-2">通知事件</label>
+                        <div class="space-y-2">
+                            {% for label in ['任务完成时', '任务失败时', '质检不通过时', '发布成功时'] %}
+                            <label class="flex items-center gap-2.5 text-[14px] cursor-pointer">
+                                <input type="checkbox" class="w-4 h-4 rounded accent-fg-strong" {{ 'checked' if loop.index <= 2 else '' }} />
+                                <span>{{ label }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-8">
+                    <button class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">测试通知</button>
+                    <button class="h-9 px-5 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong shadow-btn transition">保存</button>
+                </div>
+            </div>
+
+            <!-- System -->
+            <div x-show="active === 'system'" x-transition x-cloak>
+                <h2 class="text-[15px] font-semibold text-fg-strong mb-5">系统</h2>
+                <div class="grid grid-cols-3 gap-4 mb-6">
+                    <div class="rounded-2xl bg-muted px-4 py-3">
+                        <div class="text-[12px] text-fg-sub">版本</div>
+                        <div class="text-[14px] font-medium text-fg-strong mt-0.5">v0.1.0</div>
+                    </div>
+                    <div class="rounded-2xl bg-muted px-4 py-3">
+                        <div class="text-[12px] text-fg-sub">Python</div>
+                        <div class="text-[14px] font-medium text-fg-strong mt-0.5">3.11</div>
+                    </div>
+                    <div class="rounded-2xl bg-muted px-4 py-3">
+                        <div class="text-[12px] text-fg-sub">运行时间</div>
+                        <div class="text-[14px] font-medium text-fg-strong mt-0.5">—</div>
+                    </div>
+                </div>
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">日志级别</label>
+                        <select class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none">
+                            <option>INFO</option>
+                            <option>DEBUG</option>
+                            <option>WARNING</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">并发任务数</label>
+                        <input type="number" value="2" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none" />
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-8">
+                    <button class="flex-1 h-9 rounded-2xl border-2 border-red-200 text-[13px] font-semibold text-red-600 hover:bg-red-50 hover:border-red-300 transition">重启服务</button>
+                    <button class="flex-1 h-9 rounded-2xl border-2 border-border text-[13px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">导出日志</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const asrTtsEndpoint = '/api/system/settings/asr-tts';
+    const translationTestEndpoint = '/api/system/test/translation';
+    const ttsTestEndpoint = '/api/system/test/tts';
+    const defaultVoices = [
+        { id: 'zh_female_shuangkuaisisi_moon_bigtts', name: '双快思思(女)', language: 'zh-CN' },
+        { id: 'zh_female_cancan_mars_bigtts', name: '灿灿(女)', language: 'zh-CN' },
+        { id: 'zh_male_ahu_conversation_wvae_bigtts', name: '阿虎(男)', language: 'zh-CN' },
+        { id: 'BV001_streaming', name: '通用女声(BV)', language: 'zh-CN' },
+        { id: 'BV002_streaming', name: '通用男声(BV)', language: 'zh-CN' },
+        { id: 'BV700_streaming', name: '知性女声(BV)', language: 'zh-CN' },
+    ];
+    window._ttsVoices = defaultVoices.slice();
+
+    function byId(id) {
+        return document.getElementById(id);
+    }
+
+    function setValue(id, value) {
+        const node = byId(id);
+        if (node) {
+            node.value = value ?? '';
+        }
+    }
+
+    function setChecked(id, checked) {
+        const node = byId(id);
+        if (node) {
+            node.checked = !!checked;
+        }
+    }
+
+    function readCsvInput(id) {
+        const raw = (byId(id)?.value || '').trim();
+        if (!raw) {
+            return [];
+        }
+        return raw.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+
+    function readCsvInputOrDefault(id, defaults) {
+        const parsed = readCsvInput(id);
+        return parsed.length > 0 ? parsed : defaults;
+    }
+
+    function readNumber(id, defaultValue) {
+        const raw = byId(id)?.value || '';
+        const value = Number.parseInt(raw, 10);
+        return Number.isFinite(value) && value > 0 ? value : defaultValue;
+    }
+
+    function renderVoiceOptions(voices, selectedVoice) {
+        const list = Array.isArray(voices) && voices.length > 0 ? voices : defaultVoices;
+        window._ttsVoices = list;
+        const selectIds = ['tts-volcengine-default-voice', 'tts-test-voice'];
+        selectIds.forEach((id) => {
+            const select = byId(id);
+            if (!select) {
+                return;
+            }
+            select.innerHTML = '';
+            list.forEach((voice) => {
+                const idText = String(voice.id || '').trim();
+                if (!idText) {
+                    return;
+                }
+                const nameText = String(voice.name || idText).trim() || idText;
+                const option = document.createElement('option');
+                option.value = idText;
+                option.textContent = `${nameText} (${idText})`;
+                select.appendChild(option);
+            });
+        });
+
+        const target = selectedVoice || list[0]?.id || 'zh_female_shuangkuaisisi_moon_bigtts';
+        setValue('tts-volcengine-default-voice', target);
+        setValue('tts-test-voice', target);
+    }
+
+    function parseResponseError(payload, fallbackMessage) {
+        if (!payload) {
+            return fallbackMessage;
+        }
+        if (typeof payload.detail === 'string') {
+            return payload.detail;
+        }
+        if (Array.isArray(payload.detail)) {
+            const first = payload.detail[0];
+            if (first && typeof first.msg === 'string') {
+                return first.msg;
+            }
+        }
+        if (typeof payload.error === 'string') {
+            return payload.error;
+        }
+        return fallbackMessage;
+    }
+
+    function applyAsrTtsSettings(data) {
+        const translation = data?.translation || {};
+        const volcTranslation = translation.volcengine_ark || {};
+        const asr = data?.asr || {};
+        const tts = data?.tts || {};
+        const whisper = asr.whisper || {};
+        const asrVolc = asr.volcengine || {};
+        const ttsVolc = tts.volcengine || {};
+
+        if (Object.keys(translation).length > 0) {
+            setValue('translation-provider', translation.provider || 'llm');
+            if (Object.prototype.hasOwnProperty.call(volcTranslation, 'enabled')) {
+                setChecked('translation-volcengine-enabled', volcTranslation.enabled);
+            }
+            setValue('translation-volcengine-base-url', volcTranslation.base_url || 'https://ark.cn-beijing.volces.com/api/v3');
+            setValue('translation-volcengine-api-key', volcTranslation.api_key || '');
+            setValue('translation-volcengine-model', volcTranslation.model || 'doubao-seed-translation');
+            setValue('translation-volcengine-timeout', volcTranslation.timeout || 60);
+        }
+
+        setValue('asr-provider', asr.provider || 'auto');
+        setChecked('asr-allow-fallback', asr.allow_fallback);
+        setChecked('asr-allow-klic-fallback', asr.allow_klicstudio_fallback);
+        setChecked('asr-allow-router-with-tts', asr.allow_router_with_tts);
+        setValue('asr-fallback-order', (asr.fallback_order || []).join(','));
+        setChecked('asr-youtube-skip-download', asr.youtube_skip_download);
+        setValue('asr-youtube-preferred-langs', (asr.youtube_preferred_langs || []).join(','));
+
+        setValue('asr-whisper-base-url', whisper.base_url || 'http://127.0.0.1:8866/v1');
+        setValue('asr-whisper-model', whisper.model || 'whisper-1');
+        setValue('asr-whisper-timeout', whisper.timeout || 600);
+
+        setChecked('asr-volcengine-enabled', asrVolc.enabled);
+        setValue('asr-volcengine-app-id', asrVolc.app_id || '');
+        setValue('asr-volcengine-token', asrVolc.token || '');
+        setValue('asr-volcengine-http-url', asrVolc.http_url || '');
+        setValue('asr-volcengine-ws-url', asrVolc.ws_url || '');
+        setValue('asr-volcengine-timeout', asrVolc.timeout || 120);
+
+        setValue('tts-provider', tts.provider || 'klicstudio');
+        setValue('tts-fallback-order', (tts.fallback_order || []).join(','));
+        if (Object.prototype.hasOwnProperty.call(ttsVolc, 'enabled')) {
+            setChecked('tts-volcengine-enabled', ttsVolc.enabled);
+        }
+        setValue('tts-volcengine-app-id', ttsVolc.appid || ttsVolc.app_id || '');
+        setValue('tts-volcengine-token', ttsVolc.access_token || ttsVolc.token || '');
+        setValue('tts-volcengine-cluster', ttsVolc.cluster || 'volcano_tts');
+        setValue('tts-volcengine-resource-id', ttsVolc.resource_id || 'seed-tts-1.0');
+        setValue('tts-volcengine-api-url', ttsVolc.api_url || ttsVolc.synthesis_url || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional');
+        setValue('tts-volcengine-sample-rate', ttsVolc.sample_rate || 24000);
+        setValue('tts-volcengine-timeout', ttsVolc.timeout || 120);
+        renderVoiceOptions(
+            ttsVolc.available_voices || defaultVoices,
+            ttsVolc.default_voice || ttsVolc.voice_id || 'zh_female_shuangkuaisisi_moon_bigtts'
+        );
+    }
+
+    async function loadAsrTtsSettings() {
+        try {
+            const response = await fetch(asrTtsEndpoint, { method: 'GET' });
+            if (!response.ok) {
+                throw new Error('load_failed');
+            }
+            const data = await response.json();
+            applyAsrTtsSettings(data);
+        } catch (error) {
+            showToast('加载 ASR/TTS 配置失败', 'error');
+        }
+    }
+
+    function buildAsrTtsPayload() {
+        const selectedVoice = byId('tts-volcengine-default-voice')?.value || 'zh_female_shuangkuaisisi_moon_bigtts';
+        const appid = byId('tts-volcengine-app-id')?.value || '';
+        const accessToken = byId('tts-volcengine-token')?.value || '';
+        const apiUrl = byId('tts-volcengine-api-url')?.value || '';
+        const voices = Array.isArray(window._ttsVoices) && window._ttsVoices.length > 0
+            ? window._ttsVoices
+            : defaultVoices;
+
+        return {
+            translation: {
+                provider: byId('translation-provider')?.value || 'llm',
+                strict_json: true,
+                volcengine_ark: {
+                    enabled: !!byId('translation-volcengine-enabled')?.checked,
+                    base_url: byId('translation-volcengine-base-url')?.value || 'https://ark.cn-beijing.volces.com/api/v3',
+                    api_key: byId('translation-volcengine-api-key')?.value || '',
+                    model: byId('translation-volcengine-model')?.value || 'doubao-seed-translation',
+                    timeout: readNumber('translation-volcengine-timeout', 60),
+                },
+                llm: {
+                    timeout: 60,
+                },
+            },
+            asr: {
+                provider: byId('asr-provider')?.value || 'auto',
+                allow_fallback: !!byId('asr-allow-fallback')?.checked,
+                allow_klicstudio_fallback: !!byId('asr-allow-klic-fallback')?.checked,
+                allow_router_with_tts: !!byId('asr-allow-router-with-tts')?.checked,
+                fallback_order: readCsvInputOrDefault('asr-fallback-order', ['youtube', 'volcengine', 'whisper']),
+                youtube_skip_download: !!byId('asr-youtube-skip-download')?.checked,
+                youtube_preferred_langs: readCsvInput('asr-youtube-preferred-langs'),
+                whisper: {
+                    base_url: byId('asr-whisper-base-url')?.value || 'http://127.0.0.1:8866/v1',
+                    model: byId('asr-whisper-model')?.value || 'whisper-1',
+                    timeout: readNumber('asr-whisper-timeout', 600),
+                },
+                volcengine: {
+                    enabled: !!byId('asr-volcengine-enabled')?.checked,
+                    app_id: byId('asr-volcengine-app-id')?.value || '',
+                    token: byId('asr-volcengine-token')?.value || '',
+                    http_url: byId('asr-volcengine-http-url')?.value || '',
+                    ws_url: byId('asr-volcengine-ws-url')?.value || '',
+                    timeout: readNumber('asr-volcengine-timeout', 120),
+                },
+            },
+            tts: {
+                provider: byId('tts-provider')?.value || 'klicstudio',
+                fallback_order: readCsvInputOrDefault('tts-fallback-order', ['volcengine', 'klicstudio']),
+                volcengine: {
+                    enabled: !!byId('tts-volcengine-enabled')?.checked,
+                    appid: appid,
+                    access_token: accessToken,
+                    resource_id: byId('tts-volcengine-resource-id')?.value || 'seed-tts-1.0',
+                    cluster: byId('tts-volcengine-cluster')?.value || 'volcano_tts',
+                    api_url: apiUrl || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+                    default_voice: selectedVoice,
+                    sample_rate: readNumber('tts-volcengine-sample-rate', 24000),
+                    available_voices: voices,
+                    app_id: appid,
+                    token: accessToken,
+                    synthesis_url: apiUrl || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+                    voice_id: selectedVoice,
+                    clone_url: '',
+                    timeout: readNumber('tts-volcengine-timeout', 120),
+                },
+            },
+        };
+    }
+
+    async function saveAsrTtsSettings() {
+        try {
+            const response = await fetch(asrTtsEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildAsrTtsPayload()),
+            });
+            if (!response.ok) {
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(parseResponseError(payload, 'save_failed'));
+            }
+            const data = await response.json().catch(() => ({}));
+            if (data && typeof data === 'object') {
+                applyAsrTtsSettings(data);
+            }
+            showToast('ASR/TTS 配置已保存（Worker 重启后生效）', 'success');
+        } catch (error) {
+            showToast(`保存配置失败: ${error.message || '请检查输入格式'}`, 'error');
+        }
+    }
+
+    async function testTranslation() {
+        const testText = byId('translation-test-text')?.value || '';
+        if (!testText.trim()) {
+            showToast('请先输入测试文本', 'error');
+            return;
+        }
+        const provider = byId('translation-provider')?.value || 'llm';
+        const volcApiKey = (byId('translation-volcengine-api-key')?.value || '').trim();
+        const useVolcengine = provider === 'volcengine_ark';
+        if (useVolcengine && !volcApiKey) {
+            showToast('请填写 Ark API Key', 'error');
+            return;
+        }
+        const payload = {
+            provider,
+            text: testText,
+            source_lang: byId('translation-test-source-lang')?.value || 'en',
+            target_lang: byId('translation-test-target-lang')?.value || 'zh-CN',
+        };
+        if (useVolcengine) {
+            payload.enabled = !!byId('translation-volcengine-enabled')?.checked || !!volcApiKey;
+            payload.base_url = byId('translation-volcengine-base-url')?.value || 'https://ark.cn-beijing.volces.com/api/v3';
+            payload.api_key = volcApiKey;
+            payload.model = byId('translation-volcengine-model')?.value || 'doubao-seed-translation';
+            payload.timeout = readNumber('translation-volcengine-timeout', 60);
+        }
+        try {
+            const resp = await fetch(translationTestEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                throw new Error(parseResponseError(data, '翻译测试失败'));
+            }
+            byId('translation-test-result-text').textContent = data.result || '';
+            byId('translation-test-result-box').classList.remove('hidden');
+            showToast('翻译测试成功', 'success');
+        } catch (error) {
+            showToast(error.message || '翻译测试失败', 'error');
+        }
+    }
+
+    async function testTTS() {
+        const text = byId('tts-test-text')?.value || '';
+        const voice =
+            byId('tts-test-voice')?.value
+            || byId('tts-volcengine-default-voice')?.value
+            || 'zh_female_shuangkuaisisi_moon_bigtts';
+        const appid = (byId('tts-volcengine-app-id')?.value || '').trim();
+        const accessToken = (byId('tts-volcengine-token')?.value || '').trim();
+        const enabledFromForm = !!byId('tts-volcengine-enabled')?.checked || (!!appid && !!accessToken);
+        if (!text.trim()) {
+            showToast('请先输入TTS测试文本', 'error');
+            return;
+        }
+        if (!appid || !accessToken) {
+            showToast('请填写火山 TTS 的 appid 和 access_token', 'error');
+            return;
+        }
+        try {
+            const resp = await fetch(ttsTestEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: 'volcengine',
+                    text,
+                    voice_type: voice,
+                    enabled: enabledFromForm,
+                    appid,
+                    access_token: accessToken,
+                    resource_id: byId('tts-volcengine-resource-id')?.value || 'seed-tts-1.0',
+                    cluster: byId('tts-volcengine-cluster')?.value || 'volcano_tts',
+                    api_url: byId('tts-volcengine-api-url')?.value || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
+                    sample_rate: readNumber('tts-volcengine-sample-rate', 24000),
+                    timeout: readNumber('tts-volcengine-timeout', 120),
+                }),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                throw new Error(parseResponseError(data, 'TTS测试失败'));
+            }
+            const player = byId('tts-test-audio');
+            player.src = data.audio_url || '';
+            byId('tts-test-result-box').classList.remove('hidden');
+            showToast('TTS测试成功', 'success');
+        } catch (error) {
+            showToast(error.message || 'TTS测试失败', 'error');
+        }
+    }
+
+    async function resetAsrTtsForm() {
+        await loadAsrTtsSettings();
+    }
+
+    window.saveAsrTtsSettings = saveAsrTtsSettings;
+    window.resetAsrTtsForm = resetAsrTtsForm;
+    window.testTranslation = testTranslation;
+    window.testTTS = testTTS;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadAsrTtsSettings();
+    });
+</script>
+{% endblock %}

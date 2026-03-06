@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}任务详情 - 视频工厂{% endblock %}
+{% block nav_tasks %}active{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-[21px] font-bold text-fg-strong">任务详情</h1>
+    <p class="text-[14px] text-fg-sub mt-1">查看任务执行状态和处理信息</p>
+</div>
+
+<div class="rounded-3xl border border-border p-6 shadow-card">
+    <div class="flex items-center justify-between gap-3 mb-5">
+        <div>
+            <div class="text-[12px] text-fg-sub">任务 ID</div>
+            <div class="text-[14px] font-mono text-fg-strong" id="task-id">{{ task_id }}</div>
+        </div>
+        <a href="/tasks" class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg inline-flex items-center hover:bg-muted hover:border-fg-faint transition">返回任务列表</a>
+    </div>
+
+    <!-- 步骤进度条 -->
+    <div class="mb-5 px-1" id="step-progress">
+        <!-- JS 动态渲染 -->
+    </div>
+
+    <div class="grid grid-cols-3 gap-4 text-[13px]">
+        <div class="rounded-2xl bg-muted px-4 py-3">
+            <div class="text-fg-sub mb-1">状态</div>
+            <div class="text-fg-strong font-medium" id="task-state">加载中...</div>
+        </div>
+        <div class="rounded-2xl bg-muted px-4 py-3">
+            <div class="text-fg-sub mb-1">进度</div>
+            <div class="text-fg-strong font-medium" id="task-progress">-</div>
+        </div>
+        <div class="rounded-2xl bg-muted px-4 py-3">
+            <div class="text-fg-sub mb-1">任务范围</div>
+            <div class="text-fg-strong font-medium" id="task-scope">-</div>
+        </div>
+        <div class="rounded-2xl bg-muted px-4 py-3">
+            <div class="text-fg-sub mb-1">创建时间</div>
+            <div class="text-fg-strong font-medium" id="task-created-at">-</div>
+        </div>
+        <div class="rounded-2xl bg-muted px-4 py-3">
+            <div class="text-fg-sub mb-1">更新时间</div>
+            <div class="text-fg-strong font-medium" id="task-updated-at">-</div>
+        </div>
+        <div class="rounded-2xl bg-muted px-4 py-3">
+            <div class="text-fg-sub mb-1">耗时</div>
+            <div class="text-fg-strong font-medium" id="task-duration">-</div>
+        </div>
+    </div>
+
+    <div class="mt-4 rounded-2xl border border-border px-4 py-3">
+        <div class="text-[12px] text-fg-sub mb-1">源视频地址</div>
+        <div class="text-[13px] text-fg break-all" id="task-source-url">-</div>
+    </div>
+
+    <div class="mt-4 rounded-2xl border border-border px-4 py-3" id="error-section" style="display:none">
+        <div class="text-[12px] text-red-500 mb-1">错误信息</div>
+        <div class="text-[13px] text-red-600" id="task-error-message">-</div>
+    </div>
+
+    <div class="mt-4 rounded-2xl border border-border px-4 py-3">
+        <div class="text-[12px] text-fg-sub mb-2">产出下载</div>
+        <div id="artifact-list" class="space-y-2">
+            <div class="text-[13px] text-fg-faint">加载中...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    var taskId = {{ task_id | tojson }};
+    var lastArtifactSignature = null;
+    var apiBases = (function() {
+        var bases = [window.location.origin];
+        var uniq = [];
+        for (var i = 0; i < bases.length; i++) {
+            if (uniq.indexOf(bases[i]) === -1) uniq.push(bases[i]);
+        }
+        return uniq;
+    })();
+
+    var scopeLabels = {
+        "subtitle_only": "仅翻译字幕（无配音）",
+        "subtitle_dub": "翻译+配音",
+        "dub_and_copy": "翻译+配音+文案",
+        "full": "全流程"
+    };
+
+    // scope → 对应的步骤列表 + 每步对应的状态
+    var scopeSteps = {
+        "subtitle_only": [
+            { label: "下载", states: ["downloading", "downloaded", "uploading_source"] },
+            { label: "翻译", states: ["translating"] },
+            { label: "质检", states: ["qc_checking", "qc_passed"] },
+            { label: "字幕压制", states: ["processing", "uploading_products", "ready_to_publish"] },
+            { label: "完成", states: ["completed"] }
+        ],
+        "subtitle_dub": [
+            { label: "下载", states: ["downloading", "downloaded", "uploading_source"] },
+            { label: "翻译配音", states: ["translating"] },
+            { label: "质检", states: ["qc_checking", "qc_passed"] },
+            { label: "完成", states: ["completed"] }
+        ],
+        "dub_and_copy": [
+            { label: "下载", states: ["downloading", "downloaded", "uploading_source"] },
+            { label: "翻译配音", states: ["translating"] },
+            { label: "质检", states: ["qc_checking", "qc_passed"] },
+            { label: "二次创作", states: ["processing", "uploading_products", "ready_to_publish"] },
+            { label: "完成", states: ["completed"] }
+        ],
+        "full": [
+            { label: "下载", states: ["downloading", "downloaded", "uploading_source"] },
+            { label: "翻译配音", states: ["translating"] },
+            { label: "质检", states: ["qc_checking", "qc_passed"] },
+            { label: "二次创作", states: ["processing", "uploading_products", "ready_to_publish"] },
+            { label: "发布", states: ["publishing"] },
+            { label: "完成", states: ["completed"] }
+        ]
+    };
+
+    // 计算步骤的顺序号（用于对比已完成/进行中/未到达）
+    function getStepIndex(steps, state) {
+        if (state === "failed") return -1;
+        if (state === "queued") return -1;
+        for (var i = 0; i < steps.length; i++) {
+            if (steps[i].states.indexOf(state) !== -1) return i;
+        }
+        return -1;
+    }
+
+    function renderSteps(scope, state) {
+        var steps = scopeSteps[scope] || scopeSteps["full"];
+        var currentIdx = getStepIndex(steps, state);
+        var container = document.getElementById("step-progress");
+        if (!container) return;
+
+        var html = '<div class="flex items-center justify-between">';
+        for (var i = 0; i < steps.length; i++) {
+            var step = steps[i];
+            var isDone = currentIdx > i;
+            var isCurrent = currentIdx === i;
+            var isFailed = state === "failed";
+
+            // 圆点
+            var dotClass = "";
+            if (isDone) {
+                dotClass = "w-3 h-3 rounded-full bg-black";
+            } else if (isCurrent) {
+                dotClass = "w-3 h-3 rounded-full border-2 border-black bg-white";
+                if (isFailed) dotClass = "w-3 h-3 rounded-full bg-red-500";
+            } else {
+                dotClass = "w-3 h-3 rounded-full bg-fg-faint/40";
+            }
+
+            html += '<div class="flex flex-col items-center" style="flex:0 0 auto">';
+            html += '<div class="' + dotClass + '"></div>';
+            html += '<div class="text-[11px] mt-1 ' + (isDone || isCurrent ? 'text-fg-strong font-medium' : 'text-fg-faint') + '">' + step.label + '</div>';
+            html += '</div>';
+
+            // 连线（最后一个不画）
+            if (i < steps.length - 1) {
+                var lineColor = (currentIdx > i) ? "bg-black" : "bg-fg-faint/30";
+                html += '<div class="flex-1 h-0.5 mx-2 mt-[-8px] rounded ' + lineColor + '"></div>';
+            }
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function formatTime(ts) {
+        if (!ts) return "-";
+        var d = new Date(ts * 1000);
+        if (Number.isNaN(d.getTime())) return "-";
+        return d.toLocaleString("zh-CN");
+    }
+
+    function formatDuration(seconds) {
+        if (!seconds || seconds <= 0) return "-";
+        if (seconds < 60) return Math.round(seconds) + " 秒";
+        if (seconds < 3600) return Math.round(seconds / 60) + " 分钟";
+        return (seconds / 3600).toFixed(1) + " 小时";
+    }
+
+    function formatBytes(bytes) {
+        if (!bytes || bytes <= 0) return "-";
+        var units = ["B", "KB", "MB", "GB", "TB"];
+        var value = bytes;
+        var idx = 0;
+        while (value >= 1024 && idx < units.length - 1) {
+            value = value / 1024;
+            idx += 1;
+        }
+        return value.toFixed(value >= 10 ? 0 : 1) + " " + units[idx];
+    }
+
+    async function fetchJson(path) {
+        var lastError = null;
+        for (var i = 0; i < apiBases.length; i++) {
+            var url = apiBases[i] + path;
+            try {
+                var resp = await fetch(url, { cache: "no-store" });
+                if (!resp.ok) {
+                    lastError = new Error("HTTP " + resp.status);
+                    continue;
+                }
+                return await resp.json();
+            } catch (e) {
+                lastError = e;
+            }
+        }
+        throw lastError || new Error("request_failed");
+    }
+
+    function renderArtifacts(artifacts) {
+        var container = document.getElementById("artifact-list");
+        if (!container) return;
+
+        if (!artifacts || artifacts.length === 0) {
+            container.innerHTML = '<div class="text-[13px] text-fg-faint">暂无可下载产物</div>';
+            return;
+        }
+
+        var rows = artifacts.map(function(item) {
+            var canDownload = !!item.downloadable;
+            var disabled = canDownload ? "" : "pointer-events-none opacity-40";
+            var button = canDownload
+                ? '<a href="' + item.download_url + '" class="h-8 px-3 rounded-xl bg-black text-white text-[12px] font-medium inline-flex items-center">下载</a>'
+                : '<span class="h-8 px-3 rounded-xl bg-muted text-fg-faint text-[12px] font-medium inline-flex items-center">不可用</span>';
+
+            return '' +
+                '<div class="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-muted/60">' +
+                    '<div class="min-w-0">' +
+                        '<div class="text-[13px] text-fg-strong truncate">' + (item.name || item.filename) + '</div>' +
+                        '<div class="text-[11px] text-fg-faint mt-0.5">' + (item.type || "file") + ' · ' + formatBytes(item.size_bytes || 0) + '</div>' +
+                    '</div>' +
+                    '<div class="' + disabled + '">' + button + '</div>' +
+                '</div>';
+        });
+
+        container.innerHTML = rows.join("");
+    }
+
+    async function loadArtifacts() {
+        var container = document.getElementById("artifact-list");
+        try {
+            var payload;
+            try {
+                payload = await fetchJson("/api/tasks/" + encodeURIComponent(taskId) + "/artifacts");
+            } catch (e1) {
+                // 兼容某些网关未转发 /api 前缀
+                payload = await fetchJson("/tasks/" + encodeURIComponent(taskId) + "/artifacts");
+            }
+            var artifacts = payload.artifacts || [];
+            var signature = artifacts.map(function(a) {
+                return [a.artifact_id, a.exists, a.downloadable, a.size_bytes].join(":");
+            }).join("|");
+            if (lastArtifactSignature === null || signature !== lastArtifactSignature) {
+                lastArtifactSignature = signature;
+                renderArtifacts(artifacts);
+            }
+        } catch (e) {
+            if (container) container.innerHTML = '<div class="text-[13px] text-red-500">产出列表加载失败（请确认 API 服务已启动）</div>';
+        }
+    }
+
+    async function loadTask() {
+        try {
+            var data = await fetchJson("/api/tasks/" + encodeURIComponent(taskId));
+            var scope = data.task_scope || "full";
+
+            document.getElementById("task-state").textContent = data.state || "-";
+            document.getElementById("task-progress").textContent = String(data.progress || 0) + "%";
+            document.getElementById("task-scope").textContent = scopeLabels[scope] || scope;
+            document.getElementById("task-created-at").textContent = formatTime(data.created_at);
+            document.getElementById("task-updated-at").textContent = formatTime(data.updated_at);
+            document.getElementById("task-duration").textContent = formatDuration(data.duration_seconds);
+            document.getElementById("task-source-url").textContent = data.source_url || "-";
+
+            // 错误信息
+            var errorSection = document.getElementById("error-section");
+            if (data.error_message) {
+                errorSection.style.display = "block";
+                document.getElementById("task-error-message").textContent = data.error_message;
+            } else {
+                errorSection.style.display = "none";
+            }
+
+            // 步骤进度条
+            renderSteps(scope, data.state);
+            await loadArtifacts();
+        } catch (error) {
+            document.getElementById("task-state").textContent = "加载失败";
+        }
+    }
+
+    loadTask();
+    setInterval(loadTask, 5000);
+})();
+</script>
+{% endblock %}

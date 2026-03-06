@@ -1,0 +1,34 @@
+{% if tasks|length == 0 %}
+<div class="py-10 text-center">
+    <p class="text-[14px] text-fg-sub">暂无活跃任务</p>
+    <p class="text-[12px] text-fg-faint mt-1">创建一个新任务开始</p>
+</div>
+{% else %}
+<div class="space-y-2.5">
+    {% for task in tasks %}
+    <a href="/tasks/{{ task.task_id }}" class="block px-4 py-3 rounded-2xl hover:bg-muted transition">
+        <div class="flex items-center justify-between mb-2">
+            <div class="flex-1 min-w-0">
+                <div class="text-[14px] font-medium text-fg-strong truncate">{{ task.source_title or task.source_url or '未命名' }}</div>
+                <div class="flex items-center gap-2 text-[12px] text-fg-sub font-mono mt-0.5">
+                    <span>{{ task.task_id[:8] }}</span>
+                    {% if task.scope_label %}
+                    <span class="px-1.5 py-0.5 rounded-md bg-muted text-[10px] text-fg font-medium font-sans">{{ task.scope_label }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            <span class="ml-3 px-2.5 py-1 rounded-lg text-[12px] font-medium {{ task.status_bg }} {{ task.status_color }}">
+                {{ task.status_text }}
+            </span>
+        </div>
+        <div class="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+            <div class="h-full bg-fg-strong rounded-full task-progress" style="width: {{ task.progress }}%"></div>
+        </div>
+        <div class="flex justify-between mt-1.5 text-[11px] text-fg-faint">
+            <span>{{ task.current_step }}</span>
+            <span>{{ task.progress }}%</span>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% endif %}

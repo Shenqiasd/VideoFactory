@@ -1,0 +1,18 @@
+<div class="grid grid-cols-4 gap-4 mb-8">
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">总任务</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">{{ stats.total_tasks }}</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">活跃</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">{{ stats.active_tasks }}</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">成功率</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">{{ "%.0f"|format(stats.success_rate) }}%</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">待发布</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">{{ stats.pending_publish }}</div>
+    </div>
+</div>
