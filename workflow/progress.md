@@ -1,6 +1,23 @@
 # 执行日志
 
 ## 2026-03-09
+- 21:20 [Codex] 完成全仓回归并收口账号/发布前端问题
+  - `api/routes/publish.py` 调整 Cookie 平台识别策略：只有明确识别为错配时才拒绝，空白/脱敏 Cookie 允许进入人工发布流
+  - 修复后账号页“检测”可恢复 `active` 状态展示，发布页“标记失败 / 标记已发布 / 重试 / 取消”交互恢复
+  - 全量验证结果：`python3.11 -m pytest -q` -> `125 passed, 18 warnings`
+- 20:30 [Codex] 完成翻译主链路去 KlicStudio 中心化
+  - `src/production/pipeline.py` 改为仅走自管链路：`ASRRouter -> 字幕翻译/补翻 -> Volcengine TTS -> 视频重建 -> QC`
+  - 新增 KlicStudio 对齐产物：`origin_language.txt`、`target_language.txt`，并在主链路内写出 `origin_language_srt.srt` / `target_language_srt.srt` / `bilingual_srt.srt`
+  - 主链路现在直接生成 `translated_title`、`translated_description`、`transcript_text`，不再依赖 KlicStudio `video_info`
+- 20:45 [Codex] 收口失败语义与默认配置
+  - 移除 `yt-dlp` JS challenge 失败后“把 URL 交给 KlicStudio”的隐式降级，任务会明确失败并保留错误码
+  - `config/settings.yaml` / `config/settings.example.yaml` 默认切到自管模式：`translation.provider=volcengine_ark`、`tts.provider=volcengine`、`tts.volcengine.enabled=true`
+  - `api/routes/system.py` 与 `src/asr/__init__.py` 默认值同步调整，旧 `klicstudio` provider 仅保留兼容字段，不再作为主流程推荐项
+- 21:00 [Codex] 补充并通过回归测试
+  - 更新测试语义：下载 JS runtime 失败明确失败；ASR 失败不再回落 KlicStudio；TTS 任务保持在自管链路内完成
+  - 验证结果：
+    - `python3.11 -m pytest -q tests/test_production_asr_router.py tests/test_production_submit_failures.py tests/test_production_download_retry.py tests/web/test_download_fallback.py tests/web/test_api_contract.py -k 'asr_tts_settings or download_fallback or production_asr_router or production_submit_failures or step_download'` -> `13 passed`
+    - `python3.11 -m pytest -q tests/web/test_api_contract.py tests/test_production_asr_router.py tests/test_production_submit_failures.py tests/web/test_download_fallback.py` -> `46 passed`
 - 09:30 [Codex] 梳理当前发布链路并确认有效实现入口
   - 确认活跃发布路径为 `api/routes/distribute.py` + `api/routes/publish.py` + `src/distribute/{scheduler,publisher}.py`
   - 清理结论：`job_id` 作为发布作业主操作键，`idempotency_key` 保留作幂等去重
@@ -450,3 +467,38 @@
 - `python3.11 -m pytest -q tests/test_publish_scheduler.py` → `7 passed`
 - `python3.11 -m pytest -q tests/web/test_api_contract.py -k 'publish or partial or manual or account'` → `4 passed`
 - `python3.11 -m pytest -q tests/e2e/test_frontend_playwright.py -k accounts_page_can_create_and_validate_account` → `skipped`
+
+## 2026-03-09 17:05 - 存储管理 Day1~Day4 一次性完成
+
+**处理**:
+- `src/core/storage.py`
+  - 新增 R2/本地文件详情列表、批量删除、过期清理、时间/大小格式化
+  - 增强本地路径安全校验
+- `api/routes/storage.py`
+  - 新增存储列表、删除、清理、清理配置接口
+  - 读取/写入 `settings.yaml` 的清理配置
+- `api/server.py`
+  - 集成 `StorageCleanupScheduler`
+- `src/core/scheduler.py`
+  - 新增存储清理定时任务（APScheduler 可选）
+- `web/templates/storage.html`
+  - 存储管理 UI + Alpine 交互（列表/删除/清理）
+- `web/templates/settings.html`
+  - 存储清理规则配置界面 + 保存逻辑
+- `config/settings.yaml`
+  - 新增 `storage.auto_cleanup` 默认配置
+- `web/app.py`
+  - 兼容存储管理 API 入口
+- `tests/web/test_storage_management.py`
+  - 覆盖列表/删除/清理/配置接口
+
+**DAY_DONE**:
+- DAY_DONE: Day1 | files: src/core/storage.py, api/routes/storage.py, web/templates/storage.html | test_result: `python3.11 -m pytest -q` (2 failed: e2e/playwright)
+- DAY_DONE: Day2 | files: src/core/storage.py, api/routes/storage.py, web/templates/storage.html | test_result: `python3.11 -m pytest -q` (2 failed: e2e/playwright)
+- DAY_DONE: Day3 | files: src/core/storage.py, api/routes/storage.py, web/templates/storage.html | test_result: `python3.11 -m pytest -q` (2 failed: e2e/playwright)
+- DAY_DONE: Day4 | files: src/core/scheduler.py, api/server.py, config/settings.yaml, web/templates/settings.html | test_result: `python3.11 -m pytest -q` (2 failed: e2e/playwright)
+
+**验证**:
+- `python3.11 -m pytest -q` → `2 failed, 121 passed, 18 warnings`
+  - 失败: `tests/e2e/test_frontend_playwright.py::test_accounts_page_can_create_and_validate_account`
+  - 失败: `tests/e2e/test_frontend_playwright.py::test_publish_page_supports_cancel_retry_manual_and_partial_recovery`

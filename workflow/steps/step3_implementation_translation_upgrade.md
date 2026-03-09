@@ -139,11 +139,23 @@
 - `requirements.txt`
 
 ### 关键行为
-1. ASR 路由支持：`YouTube -> Volcengine -> Whisper`，并支持自动回退到 `KlicStudio`。
-2. 增加路由翻译分支（ASRRouter + LLM批量翻译），保持现有 KlicStudio 主路径兼容。
-3. 支持可选的 YouTube 字幕模式“跳过下载”。
-4. 路由分支在启用 TTS 且 provider=volcengine 时可尝试直接合成，失败自动回退 KlicStudio。
+1. ASR 路由支持：`YouTube -> Volcengine -> Whisper`，翻译主流程已不再依赖 `KlicStudio`。
+2. `ProductionPipeline` 现在直接在主链路中完成：
+   - `origin_language_srt.srt`
+   - `target_language_srt.srt`
+   - `bilingual_srt.srt`
+   - `origin_language.txt`
+   - `target_language.txt`
+   - `translated_title`
+   - `translated_description`
+3. 启用 TTS 时，主链路直接调用 `VolcengineTTS` 并在本地重建 `output/video_with_tts.mp4`。
+4. `yt-dlp` 的 YouTube JS runtime 失败不再隐式回退 KlicStudio，而是明确标记任务失败，便于排障。
+5. 旧 `klicstudio` provider/config 字段仅保留兼容用途，不再作为推荐主路径。
 
 ### 测试结果
-- 新增/受影响测试：`14 passed`
-- 全量测试：`84 passed, 15 warnings`
+- 新增/受影响测试：
+  - `python3.11 -m pytest -q tests/test_production_asr_router.py tests/test_production_submit_failures.py tests/test_production_download_retry.py tests/web/test_download_fallback.py tests/web/test_api_contract.py -k 'asr_tts_settings or download_fallback or production_asr_router or production_submit_failures or step_download'`
+  - 结果：`13 passed`
+- 回归验证：
+  - `python3.11 -m pytest -q tests/web/test_api_contract.py tests/test_production_asr_router.py tests/test_production_submit_failures.py tests/web/test_download_fallback.py`
+  - 结果：`46 passed`

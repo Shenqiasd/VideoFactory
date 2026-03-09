@@ -24,6 +24,8 @@ from api.routes.distribute import router as distribute_router
 from api.routes.system import router as system_router
 from api.routes.pages import router as pages_router
 from api.routes.publish import router as publish_router
+from api.routes.storage import router as storage_router
+from core.scheduler import StorageCleanupScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +40,16 @@ async def lifespan(app: FastAPI):
     from core.config import Config
     config = Config()
     logger.info(f"📋 配置加载完成")
+    cleanup_scheduler = StorageCleanupScheduler()
+    cleanup_scheduler.start()
+    app.state.storage_cleanup_scheduler = cleanup_scheduler
 
     yield
 
     # 关闭
+    scheduler = getattr(app.state, "storage_cleanup_scheduler", None)
+    if scheduler:
+        scheduler.shutdown()
     logger.info("🛑 video-factory API 关闭中...")
 
 
@@ -77,6 +85,7 @@ app.include_router(factory_router, prefix="/api/factory", tags=["加工管线"])
 app.include_router(distribute_router, prefix="/api/distribute", tags=["分发管线"])
 app.include_router(publish_router, prefix="/api/publish", tags=["发布账号"])
 app.include_router(system_router, prefix="/api/system", tags=["系统"])
+app.include_router(storage_router, prefix="/api", tags=["存储管理"])
 
 
 @app.get("/api")

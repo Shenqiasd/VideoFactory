@@ -1,3 +1,5 @@
+import json
+
 from api.routes import tasks as tasks_routes
 from api.routes import distribute as distribute_routes
 from core.task import Task, TaskState
@@ -734,9 +736,15 @@ def test_task_artifacts_alias_route_works(client, tmp_path):
 
 def test_publish_account_validation_and_default_binding(client, tmp_path):
     cookie_a = tmp_path / "douyin_a.json"
-    cookie_a.write_text("{}", encoding="utf-8")
+    cookie_a.write_text(
+        json.dumps({"cookies": [{"domain": ".douyin.com", "name": "sessionid", "value": "a"}]}),
+        encoding="utf-8",
+    )
     cookie_b = tmp_path / "douyin_b.json"
-    cookie_b.write_text("{}", encoding="utf-8")
+    cookie_b.write_text(
+        json.dumps({"cookies": [{"domain": ".douyin.com", "name": "sessionid_ss", "value": "b"}]}),
+        encoding="utf-8",
+    )
 
     first = client.post(
         "/api/publish/accounts",
@@ -761,6 +769,123 @@ def test_publish_account_validation_and_default_binding(client, tmp_path):
     defaults = [a for a in accounts if a["is_default"]]
     assert len(defaults) == 1
     assert defaults[0]["id"] == second_id
+
+
+def test_account_config_and_upload_endpoint(client, tmp_path):
+    config_resp = client.get("/api/publish/accounts/config")
+    assert config_resp.status_code == 200
+    assert "storage_dir" in config_resp.json()
+
+    cookie_file = tmp_path / "bilibili_cookie.json"
+    cookie_file.write_text("{}", encoding="utf-8")
+    with cookie_file.open("rb") as fh:
+        response = client.post(
+            "/api/publish/accounts/upload",
+            data={"platform": "bilibili", "name": "上传账号"},
+            files={"cookie_file": ("bilibili_cookie.json", fh, "application/json")},
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["account_id"]
+    assert payload["cookie_path"].endswith(".json")
+
+    accounts = client.get("/api/publish/accounts?platform=bilibili").json()["accounts"]
+    uploaded = next(account for account in accounts if account["name"] == "上传账号")
+    assert uploaded["cookie_filename"].endswith(".json")
+
+
+def test_account_format_validation_rejects_invalid_cookie_file(client, tmp_path):
+    bad_cookie = tmp_path / "bad_cookie.txt"
+    bad_cookie.write_text("not a valid cookie file", encoding="utf-8")
+
+    response = client.post(
+        "/api/publish/accounts",
+        json={"platform": "douyin", "name": "坏Cookie", "cookie_path": str(bad_cookie)},
+    )
+    assert response.status_code == 200
+    account_id = response.json()["account_id"]
+
+    accounts = client.get("/api/publish/accounts?platform=douyin").json()["accounts"]
+    target = next(account for account in accounts if account["id"] == account_id)
+    assert target["status"] == "invalid"
+    assert target["capabilities"]["format_valid"] is False
+    assert "格式" in target["last_error"]
+
+
+def test_account_upload_can_set_default_and_replace_cookie(client, tmp_path):
+    first_cookie = tmp_path / "first.json"
+    second_cookie = tmp_path / "second.txt"
+    first_cookie.write_text("{}", encoding="utf-8")
+    second_cookie.write_text("# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tFALSE\t0\ttoken\tabc\n", encoding="utf-8")
+
+    with first_cookie.open("rb") as fh:
+        response = client.post(
+            "/api/publish/accounts/upload",
+            data={"platform": "youtube", "name": "上传默认号", "is_default": "true"},
+            files={"cookie_file": ("first.json", fh, "application/json")},
+        )
+    assert response.status_code == 200
+    account_id = response.json()["account_id"]
+
+    accounts = client.get("/api/publish/accounts?platform=youtube").json()["accounts"]
+    target = next(account for account in accounts if account["id"] == account_id)
+    assert target["is_default"] is True
+
+    with second_cookie.open("rb") as fh:
+        replace_resp = client.post(
+            f"/api/publish/accounts/{account_id}/cookie",
+            files={"cookie_file": ("second.txt", fh, "text/plain")},
+        )
+    assert replace_resp.status_code == 200
+    account = replace_resp.json()["account"]
+    assert account["cookie_filename"].endswith(".txt")
+    assert account["capabilities"]["format_kind"] == "netscape"
+
+
+def test_platform_specific_cookie_validation_accepts_matching_cookie(client, tmp_path):
+    bilibili_cookie = tmp_path / "bilibili.json"
+    bilibili_cookie.write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {"domain": ".bilibili.com", "name": "SESSDATA", "value": "abc"},
+                    {"domain": ".bilibili.com", "name": "bili_jct", "value": "def"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/publish/accounts",
+        json={"platform": "bilibili", "name": "B站匹配账号", "cookie_path": str(bilibili_cookie)},
+    )
+    assert response.status_code == 200
+    account_id = response.json()["account_id"]
+    accounts = client.get("/api/publish/accounts?platform=bilibili").json()["accounts"]
+    target = next(account for account in accounts if account["id"] == account_id)
+    assert target["status"] == "active"
+    assert target["capabilities"]["platform_cookie_match"] is True
+
+
+def test_platform_specific_cookie_validation_rejects_mismatched_cookie(client, tmp_path):
+    youtube_cookie = tmp_path / "youtube.txt"
+    youtube_cookie.write_text(
+        "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tabc\n",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/publish/accounts",
+        json={"platform": "douyin", "name": "抖音错配账号", "cookie_path": str(youtube_cookie)},
+    )
+    assert response.status_code == 200
+    account_id = response.json()["account_id"]
+    accounts = client.get("/api/publish/accounts?platform=douyin").json()["accounts"]
+    target = next(account for account in accounts if account["id"] == account_id)
+    assert target["status"] == "invalid"
+    assert target["capabilities"]["platform_cookie_match"] is False
+    assert "平台不匹配" in target["last_error"]
 
 
 def test_publish_replay_accepts_partial_success_task(client, monkeypatch):

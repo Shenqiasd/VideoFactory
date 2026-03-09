@@ -19,6 +19,7 @@ from core.storage import StorageManager
 from core.runtime_settings import get_subtitle_style_defaults
 from core.subtitle_style import normalize_subtitle_style
 from factory.long_video import LongVideoProcessor
+from source.ytdlp_runtime import build_ytdlp_base_cmd
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -218,8 +219,7 @@ async def _download_preview_source(source_url: str, output_path: Path) -> tuple[
     ffmpeg = cfg.get("ffmpeg", "path", default="ffmpeg")
 
     if source_url.startswith(("http://", "https://")):
-        cmd = [
-            "yt-dlp",
+        cmd = build_ytdlp_base_cmd() + [
             "-f", "best[height<=720]/best",
             "--download-sections", "*0-8",
             "--merge-output-format", "mp4",

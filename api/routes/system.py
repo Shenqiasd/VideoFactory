@@ -77,8 +77,8 @@ class ASRVolcengineSettings(BaseModel):
 class ASRSettingsRequest(BaseModel):
     provider: str = "auto"
     allow_fallback: bool = True
-    allow_klicstudio_fallback: bool = True
-    allow_router_with_tts: bool = False
+    allow_klicstudio_fallback: bool = False
+    allow_router_with_tts: bool = True
     fallback_order: list[str] = Field(default_factory=lambda: ["youtube", "volcengine", "whisper"])
     youtube_skip_download: bool = False
     youtube_preferred_langs: list[str] = Field(default_factory=lambda: ["en", "en-US", "en-GB"])
@@ -176,8 +176,8 @@ class TTSVolcengineSettings(BaseModel):
 
 
 class TTSSettingsRequest(BaseModel):
-    provider: str = "klicstudio"
-    fallback_order: list[str] = Field(default_factory=lambda: ["volcengine", "klicstudio"])
+    provider: str = "volcengine"
+    fallback_order: list[str] = Field(default_factory=lambda: ["volcengine"])
     volcengine: TTSVolcengineSettings = Field(default_factory=TTSVolcengineSettings)
 
     @field_validator("provider")

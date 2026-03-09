@@ -1,6 +1,6 @@
 """
 生产管线 - 编排完整的翻译配音流程
-下载 → 上传R2 → KlicStudio翻译 → 质检 → 输出
+下载 → 上传R2 → 自管转写/翻译/TTS → 质检 → 输出
 """
 import asyncio
 import json
@@ -18,7 +18,9 @@ from core.notification import NotificationManager, NotifyLevel
 from core.config import Config
 from production.klicstudio_client import KlicStudioClient
 from production.subtitle_repair import SubtitleRepairer
+from source.ytdlp_runtime import build_ytdlp_base_cmd, has_yt_dlp_ejs
 from tts import VolcengineTTS
+from translation import get_translator
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +207,7 @@ class QualityChecker:
 class ProductionPipeline:
     """
     生产管线
-    编排: 下载 → 上传R2 → KlicStudio翻译 → 质检
+    编排: 下载 → 上传R2 → 自管翻译配音 → 质检
     """
 
     def __init__(
@@ -237,11 +239,16 @@ class ProductionPipeline:
         self.subtitle_repairer = SubtitleRepairer()
         self.asr_router = ASRRouter(config=config)
         self.volcengine_tts = VolcengineTTS(config=config)
+        self.translator = get_translator(config=config)
 
     @staticmethod
     def classify_download_failure(error_msg: str, has_cookies: bool) -> tuple[str, str]:
         """下载失败分型，返回 (error_code, display_message)。"""
         normalized = (error_msg or "").lower()
+        if "js challenge provider" in normalized or "[jsc]" in normalized:
+            return "DOWNLOAD_YTDLP_JS_RUNTIME", "yt-dlp 的 YouTube JS 解算环境异常，请安装/修复 yt-dlp-ejs，并检查 node/deno 配置"
+        if "yt-dlp-ejs" in normalized or "javascript runtime" in normalized:
+            return "DOWNLOAD_YTDLP_JS_RUNTIME", "yt-dlp 缺少可用的 YouTube JS 运行环境，请安装 yt-dlp-ejs 或调整 JS runtime"
         if "cookies are no longer valid" in normalized or "cookies have been rotated" in normalized:
             return "DOWNLOAD_COOKIES_INVALID", "YouTube Cookies 已过期，请到设置页面重新导入新的 Cookies"
         if "sign in to confirm you" in normalized and "not a bot" in normalized:
@@ -607,13 +614,76 @@ class ProductionPipeline:
             return ""
         return " ".join(str(line).strip() for line in lines if str(line).strip()).strip()
 
-    def _should_use_asr_router(self, task: Task) -> bool:
-        if not self.asr_router.is_router_enabled():
-            return False
-        allow_with_tts = bool(self.config.get("asr", "allow_router_with_tts", default=False))
-        if task.enable_tts and not allow_with_tts:
-            return False
-        return True
+    @staticmethod
+    def _render_plain_text(lines: List[str]) -> str:
+        return "\n".join(line.strip() for line in lines if str(line or "").strip()).strip()
+
+    @staticmethod
+    def _normalize_lang_code(lang: str) -> str:
+        normalized = str(lang or "").strip().replace("_", "-")
+        mapping = {
+            "zh-cn": "zh-CN",
+            "zh-hans": "zh-CN",
+            "zh-tw": "zh-TW",
+            "en-us": "en-US",
+            "en-gb": "en-GB",
+        }
+        lowered = normalized.lower()
+        if lowered in mapping:
+            return mapping[lowered]
+        if "-" in normalized:
+            first, second = normalized.split("-", 1)
+            return f"{first.lower()}-{second.upper()}"
+        return normalized or "zh-CN"
+
+    async def _safe_translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
+        content = (text or "").strip()
+        if not content:
+            return ""
+        try:
+            translated = await self.translator.translate_text(
+                text=content,
+                source_lang=self._normalize_lang_code(source_lang),
+                target_lang=self._normalize_lang_code(target_lang),
+            )
+        except Exception as exc:
+            logger.warning("文本翻译失败，回退原文: %s", exc)
+            return content
+        return (translated or content).strip()
+
+    async def _populate_translated_metadata(
+        self,
+        task: Task,
+        *,
+        origin_text: str,
+        target_text: str,
+    ):
+        source_title = (task.source_title or "").strip()
+        title_seed = source_title or next(
+            (line.strip() for line in target_text.splitlines() if line.strip()),
+            "",
+        )
+        if title_seed:
+            task.translated_title = await self._safe_translate_text(
+                title_seed,
+                task.source_lang,
+                task.target_lang,
+            )
+            if not task.source_title:
+                task.source_title = title_seed
+        elif not task.translated_title:
+            task.translated_title = ""
+
+        if target_text.strip():
+            task.translated_description = target_text[:2000]
+        elif origin_text.strip():
+            task.translated_description = await self._safe_translate_text(
+                origin_text[:1200],
+                task.source_lang,
+                task.target_lang,
+            )
+        else:
+            task.translated_description = ""
 
     def _should_skip_download_for_youtube_subtitle(self, task: Task) -> bool:
         if not self.asr_router.is_router_enabled():
@@ -626,7 +696,11 @@ class ProductionPipeline:
             return False
         return self.asr_router.can_use_youtube(task.source_url)
 
-    async def _step_translate_via_asr_router(self, task: Task, working_dir: Path) -> bool:
+    async def _step_translate_via_asr_router(
+        self,
+        task: Task,
+        working_dir: Path,
+    ) -> tuple[bool, str, str]:
         """
         使用 ASRRouter + LLM 翻译生成字幕文件。
         """
@@ -638,12 +712,12 @@ class ProductionPipeline:
             )
         except Exception as exc:
             logger.warning("ASR 路由失败: %s", exc)
-            return False
+            return False, "ASR_ROUTER_FAILED", f"ASR 路由失败: {exc}"
 
         origin_entries = self._parse_srt_entries(asr_result.srt_content)
         if not origin_entries:
             logger.warning("ASR 路由返回空字幕，method=%s", asr_result.method)
-            return False
+            return False, "ASR_EMPTY_SUBTITLE", "ASR 未返回有效字幕"
 
         origin_lines = [self._entry_main_line(entry) for entry in origin_entries]
         target_lines = await self.subtitle_repairer.translate_lines(origin_lines, task.target_lang)
@@ -681,58 +755,80 @@ class ProductionPipeline:
         origin_path = working_dir / "origin_language_srt.srt"
         target_path = working_dir / "target_language_srt.srt"
         bilingual_path = working_dir / "bilingual_srt.srt"
+        origin_text_path = working_dir / "origin_language.txt"
+        target_text_path = working_dir / "target_language.txt"
         self._write_srt_entries(origin_entries, origin_path)
         self._write_srt_entries(target_entries, target_path)
         self._write_srt_entries(bilingual_entries, bilingual_path)
 
-        # 可选：路由模式下尝试火山 TTS（失败后回退 KlicStudio）
+        repair_result = await self.subtitle_repairer.repair_if_needed(task, working_dir)
+        logger.info(
+            "🩹 自管字幕校正: task=%s, passed=%s, repaired=%s, repaired_lines=%s, zh_ratio=%.2f, unchanged=%.2f",
+            task.task_id,
+            repair_result.passed,
+            repair_result.repaired,
+            repair_result.repaired_lines,
+            repair_result.zh_line_ratio,
+            repair_result.unchanged_ratio,
+        )
+        if not repair_result.passed:
+            return False, "TRANSLATION_INCOMPLETE", repair_result.message
+
+        repaired_origin_entries = self._parse_srt_entries(origin_path.read_text(encoding="utf-8", errors="ignore"))
+        repaired_target_entries = self._parse_srt_entries(target_path.read_text(encoding="utf-8", errors="ignore"))
+        origin_lines = [self._entry_main_line(entry) for entry in repaired_origin_entries or origin_entries]
+        target_lines = [self._entry_main_line(entry) for entry in repaired_target_entries or target_entries]
+        origin_text = self._render_plain_text(origin_lines)
+        target_text = self._render_plain_text(target_lines)
+        origin_text_path.write_text(origin_text + ("\n" if origin_text else ""), encoding="utf-8")
+        target_text_path.write_text(target_text + ("\n" if target_text else ""), encoding="utf-8")
+        await self._populate_translated_metadata(task, origin_text=origin_text, target_text=target_text)
+
         if task.enable_tts:
-            tts_provider = str(self.config.get("tts", "provider", default="klicstudio")).strip().lower()
-            if tts_provider == "volcengine":
-                tts_text = "\n".join(line for line in target_lines if line.strip())
-                source_audio_path = task.source_local_path if (task.source_local_path and os.path.exists(task.source_local_path)) else None
-                tts_ext = self._tts_encoding_to_ext(self.volcengine_tts.encoding)
-                tts_output_path = working_dir / f"tts_final_audio.{tts_ext}"
-                tts_result = await self.volcengine_tts.synthesize(
-                    text=tts_text,
-                    output_path=str(tts_output_path),
-                    source_audio_path=source_audio_path,
-                    language=task.target_lang,
-                )
-                if tts_result:
-                    task.tts_audio_path = str(tts_result.audio_path)
-                    logger.info("✅ Volcengine TTS 合成成功: %s", tts_result.audio_path)
-                    # 路由模式也生成一个标准 video_with_tts.mp4，避免后续拿到 0s/缺音轨文件
-                    rebuilt_ok = await self._ensure_valid_translated_video(
-                        task,
-                        working_dir,
-                        video_candidate=None,
-                        audio_candidate=Path(tts_result.audio_path),
-                    )
-                    if not rebuilt_ok:
-                        logger.warning("ASR 路由未能生成有效翻译视频，将回退 KlicStudio")
-                        return False
-                else:
-                    logger.warning("Volcengine TTS 合成失败，将回退 KlicStudio")
-                    return False
-            else:
-                logger.info("路由模式未配置可用 TTS provider，回退 KlicStudio")
-                return False
+            tts_provider = str(self.config.get("tts", "provider", default="volcengine")).strip().lower()
+            if tts_provider != "volcengine":
+                return False, "TTS_PROVIDER_UNSUPPORTED", f"当前仅支持 volcengine TTS，实际配置为 {tts_provider or 'unknown'}"
+
+            source_audio_path = task.source_local_path if (task.source_local_path and os.path.exists(task.source_local_path)) else None
+            if not source_audio_path:
+                return False, "TTS_SOURCE_VIDEO_MISSING", "启用配音时必须先下载到本地源视频"
+
+            tts_ext = self._tts_encoding_to_ext(self.volcengine_tts.encoding)
+            tts_output_path = working_dir / f"tts_final_audio.{tts_ext}"
+            tts_result = await self.volcengine_tts.synthesize(
+                text=target_text,
+                output_path=str(tts_output_path),
+                source_audio_path=source_audio_path,
+                language=task.target_lang,
+            )
+            if not tts_result:
+                return False, "TTS_SYNTH_FAILED", self.volcengine_tts.last_error or "Volcengine TTS 合成失败"
+
+            task.tts_audio_path = str(tts_result.audio_path)
+            logger.info("✅ Volcengine TTS 合成成功: %s", tts_result.audio_path)
+            rebuilt_ok = await self._ensure_valid_translated_video(
+                task,
+                working_dir,
+                video_candidate=None,
+                audio_candidate=Path(tts_result.audio_path),
+            )
+            if not rebuilt_ok:
+                return False, "TTS_VIDEO_BUILD_FAILED", "TTS 音频已生成，但未能合成有效的配音视频"
 
         task.subtitle_path = str(bilingual_path)
-        task.transcript_text = target_path.read_text(encoding="utf-8", errors="ignore")
+        task.transcript_text = target_text
         task.klic_progress = 100
-        task.klic_task_id = f"asr_{asr_result.method}_{task.task_id}"
+        task.klic_task_id = f"selfhosted_{asr_result.method}_{task.task_id}"
         task.progress = 70
         task.transition(TaskState.QC_CHECKING)
         self.task_store.update(task)
         logger.info(
-            "✅ ASR 路由翻译完成: task=%s method=%s lines=%s",
+            "✅ 自管翻译完成: task=%s method=%s lines=%s",
             task.task_id,
             asr_result.method,
             len(origin_entries),
         )
-        return True
+        return True, "", ""
 
     async def _submit_klic_task_with_retry(self, task: Task, video_url: str) -> tuple[Optional[str], str]:
         """
@@ -933,13 +1029,14 @@ class ProductionPipeline:
         cookies_file: Optional[Path] = None,
     ) -> tuple[bool, str]:
         """执行一次 yt-dlp 下载，返回 (是否成功, stderr)。"""
-        cmd = [
-            "yt-dlp",
+        cmd = build_ytdlp_base_cmd() + [
             "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
             "--merge-output-format", "mp4",
             "-o", output_path,
             "--no-playlist",
         ]
+        if not has_yt_dlp_ejs():
+            logger.warning("yt-dlp-ejs 未安装，YouTube 下载可能在 JS challenge 阶段失败")
         if cookies_file:
             cmd.extend(["--cookies", str(cookies_file)])
         cmd.append(source_url)
@@ -984,94 +1081,31 @@ class ProductionPipeline:
             return False
 
     async def _step_translate(self, task: Task, working_dir: Path) -> bool:
-        """Step 3: 翻译配音（ASRRouter 或 KlicStudio）"""
+        """Step 3: 翻译配音（仅自管链路）"""
         # 跳转到翻译中状态
         self._mark_step(task, TaskState.TRANSLATING.value)
         task.transition(TaskState.TRANSLATING)
         self.task_store.update(task)
         await self.notifier.notify_task_state_change(task.task_id, task.state, "translating")
 
-        if self._should_use_asr_router(task):
-            router_ok = await self._step_translate_via_asr_router(task, working_dir)
-            if router_ok:
-                return True
-
-            if not self.asr_router.allow_klicstudio_fallback:
-                self._fail_task(task, "ASR 路由失败，且禁止回退 KlicStudio", "ASR_ROUTER_FAILED")
-                return False
-
-            logger.warning("ASR 路由失败，自动降级到 KlicStudio")
-
-        # 确定视频来源URL
-        # 优先使用已下载的本地文件（避免KlicStudio再次通过yt-dlp下载遇到bot验证）
-        if task.source_local_path and os.path.exists(task.source_local_path):
-            # 已下载到本地，使用local:前缀让KlicStudio直接读取本地文件
-            video_url = f"local:{task.source_local_path}"
-            logger.info(f"📂 使用本地文件提交KlicStudio: {task.source_local_path}")
-        elif task.source_url.startswith(("http://", "https://")):
-            # 没有本地文件，传URL让KlicStudio自行下载（可能遇到bot验证）
-            video_url = task.source_url
-            logger.warning(f"⚠️ 没有本地文件，将传YouTube URL给KlicStudio（可能因bot验证失败）")
-        else:
-            self._fail_task(task, "无法找到视频源", "SOURCE_NOT_FOUND")
+        if not self.asr_router.is_router_enabled():
+            self._fail_task(
+                task,
+                "ASR provider 未启用。请在设置中选择 auto/youtube/volcengine/whisper，而不是旧的 KlicStudio 模式",
+                "ASR_ROUTER_DISABLED",
+            )
             return False
 
-        # 提交KlicStudio任务（带重试）
-        klic_task_id, submit_error = await self._submit_klic_task_with_retry(task, video_url)
+        ok, error_code, error_message = await self._step_translate_via_asr_router(task, working_dir)
+        if ok:
+            return True
 
-        if not klic_task_id:
-            error_code, display_message = self.classify_klic_submit_failure(submit_error)
-            self._fail_task(task, display_message, error_code)
-            return False
-
-        task.klic_task_id = klic_task_id
-        task.progress = 30
-        self.task_store.update(task)
-        logger.info(f"📝 KlicStudio任务已提交: {klic_task_id}")
-
-        # 等待翻译完成（轮询）
-        result, poll_error_code = await self._poll_klic_progress(task)
-
-        if not result:
-            self._fail_task(task, "KlicStudio翻译失败或超时", poll_error_code or "KLIC_TIMEOUT")
-            return False
-
-        # 下载翻译产出物到本地
-        await self._download_klic_outputs(task, klic_task_id, working_dir)
-
-        # 强制补翻与质量闸门（中文目标语言）
-        repair_result = await self.subtitle_repairer.repair_if_needed(task, working_dir)
-        logger.info(
-            "🩹 字幕补翻结果: task=%s, passed=%s, repaired=%s, repaired_lines=%s, zh_ratio=%.2f, unchanged=%.2f",
-            task.task_id,
-            repair_result.passed,
-            repair_result.repaired,
-            repair_result.repaired_lines,
-            repair_result.zh_line_ratio,
-            repair_result.unchanged_ratio,
+        self._fail_task(
+            task,
+            error_message or "自管翻译链路失败",
+            error_code or "SELF_HOSTED_TRANSLATION_FAILED",
         )
-        if not repair_result.passed:
-            self._fail_task(task, repair_result.message, "TRANSLATION_INCOMPLETE")
-            return False
-
-        bilingual_path = working_dir / "bilingual_srt.srt"
-        if bilingual_path.exists():
-            task.subtitle_path = str(bilingual_path)
-        target_srt_path = working_dir / "target_language_srt.srt"
-        if target_srt_path.exists():
-            task.transcript_text = target_srt_path.read_text(encoding="utf-8", errors="ignore")
-
-        # 提取翻译信息
-        video_info = result.get("video_info", {})
-        task.translated_title = video_info.get("translated_title", "")
-        task.translated_description = video_info.get("translated_description", "")
-        task.source_title = video_info.get("origin_title", task.source_title)
-
-        # 进入质检
-        task.transition(TaskState.QC_CHECKING)
-        task.progress = 70
-        self.task_store.update(task)
-        return True
+        return False
 
     async def _poll_klic_progress(self, task: Task) -> tuple[Optional[Dict], Optional[str]]:
         """轮询KlicStudio任务进度，返回 (result, error_code)。"""

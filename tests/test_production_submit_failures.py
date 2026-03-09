@@ -65,7 +65,7 @@ async def test_submit_klic_task_with_retry_eventually_succeeds(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
-async def test_step_translate_marks_klic_unavailable_when_submit_connection_fails(monkeypatch, tmp_path):
+async def test_step_translate_fails_when_legacy_asr_mode_is_selected(monkeypatch, tmp_path):
     async def _fast_sleep(seconds: float):
         return None
 
@@ -85,10 +85,11 @@ async def test_step_translate_marks_klic_unavailable_when_submit_connection_fail
         klic_client=AlwaysUnavailableSubmitClient(),
         notifier=NoopNotifier(),
     )
+    pipeline.asr_router.provider = "klicstudio"
 
     ok = await pipeline._step_translate(task, tmp_path)
 
     assert ok is False
     assert task.state == TaskState.FAILED.value
-    assert task.last_error_code == "KLIC_UNAVAILABLE"
-    assert "KlicStudio 服务不可用" in task.error_message
+    assert task.last_error_code == "ASR_ROUTER_DISABLED"
+    assert "旧的 KlicStudio 模式" in task.error_message

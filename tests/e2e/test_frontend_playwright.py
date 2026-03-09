@@ -163,6 +163,20 @@ def test_create_task_api_and_tasks_page_render(live_server, browser_page):
     assert page.locator("text=" + task_id[:8]).count() > 0
 
 
+def test_new_task_page_submit_button_creates_task(live_server, browser_page):
+    page = browser_page
+    page.goto(f"{live_server}/tasks/new", wait_until="domcontentloaded")
+
+    page.locator("input[name='youtube_url']").fill("https://www.youtube.com/watch?v=e2e_form_case")
+    page.get_by_role("button", name="创建任务").click()
+
+    page.wait_for_url(f"{live_server}/tasks", timeout=3000)
+    page.wait_for_timeout(300)
+
+    assert page.locator("#task-list-container").count() == 1
+    assert page.locator("text=e2e_form_case").count() > 0
+
+
 def test_publish_storage_settings_pages_load(live_server, browser_page):
     page = browser_page
     checks = [
@@ -181,9 +195,10 @@ def test_accounts_page_can_create_and_validate_account(live_server, browser_page
     cookie_file.write_text("{}", encoding="utf-8")
 
     page.goto(f"{live_server}/accounts", wait_until="domcontentloaded")
+    assert page.locator("text=Cookie 归档目录").count() > 0
     page.select_option("select", "douyin")
     page.locator("input[placeholder='输入账号名']").fill("抖音主号")
-    page.locator("input[placeholder='/path/to/cookies.json']").fill(str(cookie_file))
+    page.locator("input[type='file']").set_input_files(str(cookie_file))
     page.get_by_role("button", name="添加").click()
 
     page.wait_for_timeout(300)

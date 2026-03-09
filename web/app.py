@@ -4,14 +4,16 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 from distribute.scheduler import PublishScheduler
 from core.task import TaskStore
 from core.database import Database
+from api.routes import storage as storage_routes
 
 router = APIRouter()
 
@@ -95,3 +97,33 @@ async def test_account(id: str):
         "cookie_exists": cookie_exists,
         "tested_at": datetime.now().isoformat()
     }
+
+
+# ----------------------------------------------------------------------------
+# Storage management compatibility endpoints
+# ----------------------------------------------------------------------------
+
+
+@router.get("/api/storage/files")
+async def get_storage_files(location: str = "r2", path: str = "raw"):
+    return await storage_routes.get_storage_files(location=location, path=path)
+
+
+@router.delete("/api/storage/files")
+async def delete_storage_files(request: Request):
+    return await storage_routes.delete_storage_files(request)
+
+
+@router.post("/api/storage/cleanup")
+async def cleanup_storage(request: Request):
+    return await storage_routes.cleanup_storage(request)
+
+
+@router.get("/api/storage/cleanup-config")
+async def get_cleanup_config():
+    return await storage_routes.get_cleanup_config()
+
+
+@router.put("/api/storage/cleanup-config")
+async def update_cleanup_config(request: Request):
+    return await storage_routes.update_cleanup_config(request)

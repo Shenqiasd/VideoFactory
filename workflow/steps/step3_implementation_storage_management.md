@@ -133,10 +133,41 @@
 
 ## ✅ 完成标准
 
-- [ ] 可以查看 R2 和本地文件列表
-- [ ] 可以手动删除单个或多个文件
-- [ ] 可以手动触发清理过期文件
-- [ ] 可以配置不同目录的清理周期
-- [ ] 定时任务自动清理
-- [ ] 前端界面完整可用
+- [x] 可以查看 R2 和本地文件列表
+- [x] 可以手动删除单个或多个文件
+- [x] 可以手动触发清理过期文件
+- [x] 可以配置不同目录的清理周期
+- [x] 定时任务自动清理
+- [x] 前端界面完整可用
 
+
+---
+
+## ✅ 实施进度更新（2026-03-09）
+
+### Day 1 完成
+- `src/core/storage.py`: 新增 R2/本地文件详情列表能力
+- `api/routes/storage.py`: 新增 `GET /api/storage/files`
+- `web/templates/storage.html`: 文件列表 UI + 目录切换
+
+### Day 2 完成
+- `src/core/storage.py`: 新增批量删除方法
+- `api/routes/storage.py`: 新增 `DELETE /api/storage/files`
+- `web/templates/storage.html`: 单个/批量删除
+
+### Day 3 完成
+- `src/core/storage.py`: 新增清理过期文件逻辑
+- `api/routes/storage.py`: 新增 `POST /api/storage/cleanup`
+- `web/templates/storage.html`: 清理入口
+
+### Day 4 完成
+- `src/core/scheduler.py`: 存储清理定时任务（APScheduler 可选）
+- `api/routes/storage.py`: 新增清理配置接口
+- `config/settings.yaml`: 新增 `storage.auto_cleanup`
+- `web/templates/settings.html`: 清理规则配置界面
+- `api/server.py`: 集成 StorageCleanupScheduler
+
+### 测试结果
+- `python3.11 -m pytest -q`
+  - 结果: `125 passed, 18 warnings`
+  - 状态: 全量通过，存储管理与账号/发布页面联动回归已一并验证
