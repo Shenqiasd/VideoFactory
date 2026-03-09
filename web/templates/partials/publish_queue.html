@@ -3,7 +3,28 @@
     <tr class="border-b border-border hover:bg-muted/30 transition">
         <td class="px-6 py-4">
             <div class="font-medium text-fg-strong">{{ job.task_title or job.task_id[:8] }}</div>
-            <div class="text-[12px] text-fg-sub mt-0.5">{{ job.product_type }}</div>
+            <div class="text-[12px] text-fg-sub mt-0.5">作业: {{ job.job_id[:12] }}</div>
+            {% if job.account_name %}
+            <div class="text-[12px] text-fg-sub mt-1">账号: {{ job.account_name }}{% if job.account_status %} / {{ job.account_status }}{% endif %}</div>
+            {% endif %}
+            {% if job.status == 'manual_pending' and job.manual_checklist %}
+            {% if job.manual_checklist.account %}
+            <div class="text-[12px] text-fg-sub mt-1">账号: {{ job.manual_checklist.account.name }}</div>
+            {% endif %}
+            <div class="text-[12px] text-fg-sub mt-1">视频: {{ job.manual_checklist.video_path }}</div>
+            {% if job.manual_checklist.cover_path %}
+            <div class="text-[12px] text-fg-sub">封面: {{ job.manual_checklist.cover_path }}</div>
+            {% endif %}
+            {% endif %}
+            {% if job.error_text %}
+            <div class="text-[12px] text-red-600 mt-1">{{ job.error_text }}</div>
+            {% endif %}
+            {% if job.account_error and job.account_status != 'active' %}
+            <div class="text-[12px] text-amber-700 mt-1">账号异常: {{ job.account_error }}</div>
+            {% endif %}
+            {% if job.latest_event.message %}
+            <div class="text-[12px] text-fg-faint mt-1">最近事件: {{ job.latest_event.message }}</div>
+            {% endif %}
         </td>
         <td class="px-6 py-4">
             <span class="inline-flex items-center px-2 py-1 rounded-lg bg-muted text-[12px] text-fg">
@@ -29,16 +50,27 @@
         <td class="px-6 py-4">
             <div class="flex gap-2">
                 {% if job.status == 'failed' %}
-                <button @click="$root.retryTask('{{ job.task_id }}', '{{ job.platform }}')"
-                        :disabled="$root.loading"
-                        class="px-2.5 py-1 text-[12px] text-blue-600 hover:bg-blue-50 rounded-lg transition font-medium disabled:opacity-50">
+                <button @click="window.vfPublishApp.retryJob('{{ job.task_id }}', '{{ job.job_id }}')"
+                        class="px-2.5 py-1 text-[12px] text-blue-600 hover:bg-blue-50 rounded-lg transition font-medium">
                     重试
                 </button>
                 {% endif %}
+                {% if job.status == 'manual_pending' %}
+                <button @click="window.vfPublishApp.completeManual('{{ job.task_id }}', '{{ job.job_id }}')"
+                        class="px-2.5 py-1 text-[12px] text-emerald-700 hover:bg-emerald-50 rounded-lg transition font-medium">
+                    标记已发布
+                </button>
+                <button @click="window.vfPublishApp.failManual('{{ job.task_id }}', '{{ job.job_id }}')"
+                        class="px-2.5 py-1 text-[12px] text-amber-700 hover:bg-amber-50 rounded-lg transition font-medium">
+                    标记失败
+                </button>
+                <button @click="if (confirm('确定取消此手动发布任务？')) window.vfPublishApp.cancelJob('{{ job.task_id }}', '{{ job.job_id }}', '{{ job.platform }}')"
+                        class="px-2.5 py-1 text-[12px] text-fg-sub hover:text-red-600 hover:bg-red-50 rounded-lg transition font-medium">
+                    取消
+                </button>
+                {% endif %}
                 {% if job.status in ['pending', 'publishing'] %}
-                <button hx-post="/api/distribute/cancel"
-                        hx-vals='{"task_id": "{{ job.task_id }}", "platform": "{{ job.platform }}"}'
-                        hx-confirm="确定取消此任务？"
+                <button @click="if (confirm('确定取消此任务？')) window.vfPublishApp.cancelJob('{{ job.task_id }}', '{{ job.job_id }}', '{{ job.platform }}')"
                         class="px-2.5 py-1 text-[12px] text-fg-sub hover:text-red-600 hover:bg-red-50 rounded-lg transition font-medium">
                     取消
                 </button>

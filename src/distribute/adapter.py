@@ -2,6 +2,7 @@
 发布适配器 - 封装 social-auto-upload 调用逻辑
 支持: 抖音、B站、小红书、YouTube、视频号
 """
+from __future__ import annotations
 import asyncio
 import json
 import logging

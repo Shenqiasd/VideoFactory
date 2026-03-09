@@ -116,6 +116,8 @@ class TaskDetailResponse(BaseModel):
     klic_task_id: str
     klic_progress: int
     duration_seconds: float
+    publish_accounts: dict = Field(default_factory=dict)
+    publish_account_details: dict = Field(default_factory=dict)
 
 
 class TaskStatsResponse(BaseModel):
@@ -749,6 +751,23 @@ async def get_task(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
 
+    from core.database import Database
+
+    db = Database()
+    publish_accounts = getattr(task, "publish_accounts", {}) or {}
+    publish_account_details = {}
+    for platform, account_id in publish_accounts.items():
+        account = db.get_account(account_id)
+        if account:
+            publish_account_details[platform] = {
+                "id": account["id"],
+                "name": account["name"],
+                "status": account["status"],
+                "is_default": account.get("is_default", False),
+                "last_error": account.get("last_error", ""),
+                "capabilities": account.get("capabilities", {}),
+            }
+
     return TaskDetailResponse(
         task_id=task.task_id,
         source_url=task.source_url,
@@ -775,6 +794,8 @@ async def get_task(task_id: str):
         klic_task_id=task.klic_task_id,
         klic_progress=task.klic_progress,
         duration_seconds=task.duration_seconds,
+        publish_accounts=publish_accounts,
+        publish_account_details=publish_account_details,
     )
 
 
@@ -881,7 +902,7 @@ async def cancel_task(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
 
-    if task.state in [TaskState.COMPLETED.value, TaskState.FAILED.value]:
+    if task.state in [TaskState.COMPLETED.value, TaskState.FAILED.value, TaskState.PARTIAL_SUCCESS.value]:
         raise HTTPException(status_code=400, detail=f"任务不可取消，当前状态: {task.state}")
 
     cancel_reason = "任务已被用户取消"

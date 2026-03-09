@@ -18,11 +18,11 @@ def test_publish_workflow_e2e(api_client):
     # 1. 创建测试账号
     resp = api_client.post("/api/publish/accounts", json={
         "platform": "douyin",
-        "account_id": "test_account_001",
-        "account_name": "测试账号",
-        "enabled": True
+        "name": "测试账号",
+        "cookie_path": ""
     })
     assert resp.status_code == 200
+    account_id = resp.json()["account_id"]
 
     # 2. 创建视频任务
     resp = api_client.post("/api/tasks/create", data={
@@ -68,5 +68,5 @@ def test_publish_workflow_e2e(api_client):
     assert resp.status_code in [200, 404]  # 404 if no failed jobs
 
     # 9. 清理 - 删除测试账号
-    resp = api_client.delete("/api/publish/accounts/douyin/test_account_001")
+    resp = api_client.delete(f"/api/publish/accounts/{account_id}")
     assert resp.status_code in [200, 404]

@@ -1,0 +1,21 @@
+{% if events %}
+    {% for event in events %}
+    <tr class="border-b border-border hover:bg-muted/20 transition">
+        <td class="px-6 py-3 text-[12px] text-fg-sub">{{ event.created_at_display }}</td>
+        <td class="px-6 py-3 text-[13px] text-fg-strong">{{ event.platform }}</td>
+        <td class="px-6 py-3 text-[13px] text-fg">{{ event.event_type }}</td>
+        <td class="px-6 py-3 text-[13px] text-fg-sub">
+            {% if event.from_status or event.to_status %}
+                {{ event.from_status or '-' }} -> {{ event.to_status or '-' }}
+            {% else %}
+                -
+            {% endif %}
+        </td>
+        <td class="px-6 py-3 text-[13px] text-fg">{{ event.message or '-' }}</td>
+    </tr>
+    {% endfor %}
+{% else %}
+    <tr>
+        <td colspan="5" class="px-6 py-10 text-center text-[13px] text-fg-sub">暂无发布事件</td>
+    </tr>
+{% endif %}

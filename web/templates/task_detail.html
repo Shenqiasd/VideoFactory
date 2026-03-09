@@ -60,8 +60,22 @@
     </div>
 
     <div class="mt-4 rounded-2xl border border-border px-4 py-3">
+        <div class="text-[12px] text-fg-sub mb-2">发布账号绑定</div>
+        <div id="publish-account-list" class="space-y-2">
+            <div class="text-[13px] text-fg-faint">加载中...</div>
+        </div>
+    </div>
+
+    <div class="mt-4 rounded-2xl border border-border px-4 py-3">
         <div class="text-[12px] text-fg-sub mb-2">产出下载</div>
         <div id="artifact-list" class="space-y-2">
+            <div class="text-[13px] text-fg-faint">加载中...</div>
+        </div>
+    </div>
+
+    <div class="mt-4 rounded-2xl border border-border px-4 py-3">
+        <div class="text-[12px] text-fg-sub mb-2">发布事件</div>
+        <div id="publish-events" class="space-y-2">
             <div class="text-[13px] text-fg-faint">加载中...</div>
         </div>
     </div>
@@ -243,6 +257,59 @@
         container.innerHTML = rows.join("");
     }
 
+    function renderPublishAccounts(data) {
+        var container = document.getElementById("publish-account-list");
+        if (!container) return;
+
+        var bindings = data.publish_accounts || {};
+        var details = data.publish_account_details || {};
+        var platforms = Object.keys(bindings);
+        if (platforms.length === 0) {
+            container.innerHTML = '<div class="text-[13px] text-fg-faint">未绑定特定账号，将使用平台默认账号</div>';
+            return;
+        }
+
+        container.innerHTML = platforms.map(function(platform) {
+            var detail = details[platform] || {};
+            var errorText = detail.last_error ? '<div class="text-[12px] text-amber-700 mt-1">' + detail.last_error + '</div>' : '';
+            return '' +
+                '<div class="rounded-xl bg-muted/60 px-3 py-2">' +
+                    '<div class="text-[13px] text-fg-strong">' + platform + ' · ' + (detail.name || bindings[platform]) + '</div>' +
+                    '<div class="text-[12px] text-fg-sub mt-1">状态: ' + (detail.status || 'unknown') + (detail.is_default ? ' / 默认账号' : '') + '</div>' +
+                    errorText +
+                '</div>';
+        }).join("");
+    }
+
+    function renderPublishEvents(events) {
+        var container = document.getElementById("publish-events");
+        if (!container) return;
+        if (!events || events.length === 0) {
+            container.innerHTML = '<div class="text-[13px] text-fg-faint">暂无发布事件</div>';
+            return;
+        }
+
+        container.innerHTML = events.map(function(event) {
+            var when = event.created_at || '-';
+            return '' +
+                '<div class="rounded-xl bg-muted/60 px-3 py-2">' +
+                    '<div class="text-[13px] text-fg-strong">' + (event.platform || '-') + ' · ' + (event.event_type || '-') + '</div>' +
+                    '<div class="text-[12px] text-fg-sub mt-1">' + when + ' · ' + ((event.from_status || '-') + ' -> ' + (event.to_status || '-')) + '</div>' +
+                    '<div class="text-[12px] text-fg mt-1">' + (event.message || '-') + '</div>' +
+                '</div>';
+        }).join("");
+    }
+
+    async function loadPublishEvents() {
+        try {
+            var payload = await fetchJson("/api/distribute/events/" + encodeURIComponent(taskId));
+            renderPublishEvents(payload.events || []);
+        } catch (e) {
+            var container = document.getElementById("publish-events");
+            if (container) container.innerHTML = '<div class="text-[13px] text-red-500">发布事件加载失败</div>';
+        }
+    }
+
     async function loadArtifacts() {
         var container = document.getElementById("artifact-list");
         try {
@@ -288,9 +355,11 @@
                 errorSection.style.display = "none";
             }
 
+            renderPublishAccounts(data);
             // 步骤进度条
             renderSteps(scope, data.state);
             await loadArtifacts();
+            await loadPublishEvents();
         } catch (error) {
             document.getElementById("task-state").textContent = "加载失败";
         }

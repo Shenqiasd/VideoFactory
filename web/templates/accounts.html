@@ -12,7 +12,7 @@
     <!-- Add Account Form -->
     <div class="rounded-3xl border border-border p-6 shadow-card">
         <h2 class="text-[15px] font-semibold text-fg-strong mb-4">添加账号</h2>
-        <form @submit.prevent="addAccount" class="grid grid-cols-3 gap-4">
+        <form @submit.prevent="addAccount" class="grid grid-cols-4 gap-4">
             <div>
                 <label class="block text-[12px] text-fg-sub mb-1.5">平台</label>
                 <select x-model="form.platform" required class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none">
@@ -25,7 +25,11 @@
             </div>
             <div>
                 <label class="block text-[12px] text-fg-sub mb-1.5">账号名</label>
-                <input x-model="form.username" type="text" required placeholder="输入账号名" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                <input x-model="form.name" type="text" required placeholder="输入账号名" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+            </div>
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1.5">Cookie 路径</label>
+                <input x-model="form.cookie_path" type="text" placeholder="/path/to/cookies.json" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
             </div>
             <div class="flex items-end">
                 <button type="submit" class="w-full h-10 px-4 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong transition">添加</button>
@@ -44,6 +48,7 @@
                     <tr>
                         <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">平台</th>
                         <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">账号名</th>
+                        <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">状态</th>
                         <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">添加时间</th>
                         <th class="px-6 py-3 text-right text-[12px] font-semibold text-fg-sub">操作</th>
                     </tr>
@@ -52,15 +57,20 @@
                     <template x-for="account in accounts" :key="account.id">
                         <tr class="hover:bg-muted/20 transition">
                             <td class="px-6 py-4 text-[13px] text-fg-strong" x-text="account.platform"></td>
-                            <td class="px-6 py-4 text-[13px] text-fg-strong" x-text="account.username"></td>
+                            <td class="px-6 py-4 text-[13px] text-fg-strong" x-text="account.name"></td>
+                            <td class="px-6 py-4 text-[13px] text-fg-sub">
+                                <span x-text="account.is_default ? '默认 / ' + account.status : account.status"></span>
+                            </td>
                             <td class="px-6 py-4 text-[13px] text-fg-sub" x-text="account.created_at"></td>
                             <td class="px-6 py-4 text-right">
+                                <button @click="testAccount(account.id)" class="px-3 py-1.5 rounded-xl bg-muted text-fg text-[12px] font-medium hover:bg-muted-dark transition">检测</button>
+                                <button x-show="!account.is_default" @click="setDefault(account.id)" class="ml-2 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-600 text-[12px] font-medium hover:bg-blue-100 transition">设为默认</button>
                                 <button @click="deleteAccount(account.id)" class="px-3 py-1.5 rounded-xl bg-red-50 text-red-600 text-[12px] font-medium hover:bg-red-100 transition">删除</button>
                             </td>
                         </tr>
                     </template>
                     <tr x-show="accounts.length === 0">
-                        <td colspan="4" class="px-6 py-8 text-center text-[13px] text-fg-sub">暂无账号</td>
+                        <td colspan="5" class="px-6 py-8 text-center text-[13px] text-fg-sub">暂无账号</td>
                     </tr>
                 </tbody>
             </table>
@@ -72,7 +82,7 @@
 function accountsApp() {
     return {
         accounts: [],
-        form: { platform: '', username: '' },
+        form: { platform: '', name: '', cookie_path: '' },
 
         async init() {
             await this.loadAccounts();
@@ -80,7 +90,7 @@ function accountsApp() {
 
         async loadAccounts() {
             try {
-                const res = await fetch('/api/accounts');
+                const res = await fetch('/api/publish/accounts');
                 const data = await res.json();
                 this.accounts = data.accounts || [];
             } catch (e) {
@@ -90,13 +100,13 @@ function accountsApp() {
 
         async addAccount() {
             try {
-                const res = await fetch('/api/accounts', {
+                const res = await fetch('/api/publish/accounts', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.form)
                 });
                 if (res.ok) {
-                    this.form = { platform: '', username: '' };
+                    this.form = { platform: '', name: '', cookie_path: '' };
                     await this.loadAccounts();
                 }
             } catch (e) {
@@ -104,10 +114,20 @@ function accountsApp() {
             }
         },
 
+        async testAccount(id) {
+            const res = await fetch(`/api/publish/accounts/${id}/test`, { method: 'POST' });
+            if (res.ok) await this.loadAccounts();
+        },
+
+        async setDefault(id) {
+            const res = await fetch(`/api/publish/accounts/${id}/default`, { method: 'POST' });
+            if (res.ok) await this.loadAccounts();
+        },
+
         async deleteAccount(id) {
             if (!confirm('确认删除此账号？')) return;
             try {
-                const res = await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
+                const res = await fetch(`/api/publish/accounts/${id}`, { method: 'DELETE' });
                 if (res.ok) await this.loadAccounts();
             } catch (e) {
                 console.error('删除失败:', e);

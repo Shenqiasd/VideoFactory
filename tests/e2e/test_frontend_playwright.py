@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 import sys
 import time
@@ -37,6 +38,7 @@ def live_server(tmp_path_factory):
     home_dir = tmp_path_factory.mktemp("vf-e2e-home")
     env = os.environ.copy()
     env["HOME"] = str(home_dir)
+    env["VF_DB_PATH"] = str(home_dir / "video_factory.db")
 
     pythonpath_items = [str(PROJECT_ROOT), str(PROJECT_ROOT / "src")]
     if env.get("PYTHONPATH"):
@@ -79,6 +81,14 @@ def live_server(tmp_path_factory):
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=2)
+
+
+@pytest.fixture(scope="module")
+def live_server_home(tmp_path_factory):
+    candidates = sorted(tmp_path_factory.getbasetemp().glob("vf-e2e-home*"))
+    if not candidates:
+        pytest.skip("未找到 E2E 隔离 HOME")
+    return candidates[-1]
 
 
 @pytest.fixture(scope="module")
@@ -163,3 +173,127 @@ def test_publish_storage_settings_pages_load(live_server, browser_page):
     for path, heading in checks:
         page.goto(f"{live_server}{path}", wait_until="domcontentloaded")
         assert page.locator("h1", has_text=heading).count() > 0
+
+
+def test_accounts_page_can_create_and_validate_account(live_server, browser_page, tmp_path):
+    page = browser_page
+    cookie_file = tmp_path / "douyin_cookie.json"
+    cookie_file.write_text("{}", encoding="utf-8")
+
+    page.goto(f"{live_server}/accounts", wait_until="domcontentloaded")
+    page.select_option("select", "douyin")
+    page.locator("input[placeholder='输入账号名']").fill("抖音主号")
+    page.locator("input[placeholder='/path/to/cookies.json']").fill(str(cookie_file))
+    page.get_by_role("button", name="添加").click()
+
+    page.wait_for_timeout(300)
+    assert page.locator("text=抖音主号").count() > 0
+    page.get_by_role("button", name="检测").first.click()
+    page.wait_for_timeout(300)
+    assert page.locator("text=active").count() > 0
+
+
+def _seed_ready_publish_task(home_dir: Path, task_id: str, title: str):
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+    from core.task import Task, TaskState, TaskStore
+
+    store = TaskStore(store_path=str(home_dir / ".video-factory" / "tasks.json"))
+    task = Task(task_id=task_id, source_url="https://example.com/video", source_title=title)
+    task.state = TaskState.READY_TO_PUBLISH.value
+    task.products = [
+        {
+            "type": "long_video",
+            "platform": "all",
+            "local_path": "/tmp/video.mp4",
+            "title": title,
+            "description": "desc",
+            "tags": ["tag"],
+        }
+    ]
+    store.update(task)
+
+
+def _wait_task_state(page, base_url: str, task_id: str, expected_state: str, timeout_seconds: float = 8.0):
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        response = page.request.get(f"{base_url}/api/tasks/{task_id}")
+        if response.ok and response.json()["state"] == expected_state:
+            return response.json()
+        page.wait_for_timeout(200)
+    raise AssertionError(f"任务 {task_id} 未在 {timeout_seconds}s 内进入状态 {expected_state}")
+
+
+def test_publish_page_supports_cancel_retry_manual_and_partial_recovery(live_server, live_server_home, browser_page, tmp_path):
+    page = browser_page
+
+    bilibili_cookie = tmp_path / "bilibili_cookie.json"
+    youtube_cookie = tmp_path / "youtube_cookie.json"
+    bilibili_cookie.write_text("{}", encoding="utf-8")
+    youtube_cookie.write_text("{}", encoding="utf-8")
+
+    bilibili_account = page.request.post(
+        f"{live_server}/api/publish/accounts",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"platform": "bilibili", "name": "B站运营号", "cookie_path": str(bilibili_cookie), "is_default": True}),
+    ).json()["account_id"]
+    youtube_account = page.request.post(
+        f"{live_server}/api/publish/accounts",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"platform": "youtube", "name": "YouTube 主号", "cookie_path": str(youtube_cookie), "is_default": True}),
+    ).json()["account_id"]
+
+    cancel_task_id = "vf_e2e_cancel"
+    _seed_ready_publish_task(live_server_home, cancel_task_id, "取消流程")
+    cancel_resp = page.request.post(
+        f"{live_server}/api/distribute/publish",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"task_id": cancel_task_id, "platforms": ["bilibili"], "publish_accounts": {"bilibili": bilibili_account}}),
+    )
+    assert cancel_resp.ok
+
+    page.goto(f"{live_server}/publish", wait_until="domcontentloaded")
+    cancel_row = page.locator("tr", has_text="取消流程").first
+    cancel_row.wait_for()
+    page.once("dialog", lambda dialog: dialog.accept())
+    cancel_row.get_by_role("button", name="取消").click()
+    expect_state = _wait_task_state(page, live_server, cancel_task_id, "failed")
+    assert "失败或取消 1 个平台" in expect_state["error_message"]
+
+    partial_task_id = "vf_e2e_partial_recovery"
+    _seed_ready_publish_task(live_server_home, partial_task_id, "部分恢复流程")
+    publish_resp = page.request.post(
+        f"{live_server}/api/distribute/publish",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({
+            "task_id": partial_task_id,
+            "platforms": ["bilibili", "youtube"],
+            "publish_accounts": {"bilibili": bilibili_account, "youtube": youtube_account},
+        }),
+    )
+    assert publish_resp.ok
+
+    page.goto(f"{live_server}/publish", wait_until="domcontentloaded")
+    bilibili_row = page.locator("tr", has_text="部分恢复流程").filter(has_text="B站").first
+    youtube_row = page.locator("tr", has_text="部分恢复流程").filter(has_text="YouTube").first
+    bilibili_row.wait_for()
+    youtube_row.wait_for()
+
+    page.once("dialog", lambda dialog: dialog.accept("cookie bad"))
+    bilibili_row.get_by_role("button", name="标记失败").click()
+
+    page.once("dialog", lambda dialog: dialog.accept("https://example.com/youtube"))
+    youtube_row.get_by_role("button", name="标记已发布").click()
+
+    partial_state = _wait_task_state(page, live_server, partial_task_id, "partial_success")
+    assert "成功 1/2" in partial_state["error_message"]
+
+    retry_row = page.locator("tr", has_text="部分恢复流程").filter(has_text="B站").first
+    retry_row.get_by_role("button", name="重试").click()
+    page.wait_for_timeout(500)
+
+    page.once("dialog", lambda dialog: dialog.accept("https://example.com/bilibili"))
+    retry_row = page.locator("tr", has_text="部分恢复流程").filter(has_text="B站").first
+    retry_row.get_by_role("button", name="标记已发布").click()
+
+    completed_state = _wait_task_state(page, live_server, partial_task_id, "completed")
+    assert completed_state["error_message"] == ""

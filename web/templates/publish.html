@@ -3,7 +3,7 @@
 {% block nav_publish %}active{% endblock %}
 
 {% block content %}
-<div x-data="publishApp()" class="mb-8">
+<div x-data="publishApp()" x-init="init()" class="mb-8">
     <h1 class="text-[21px] font-bold text-fg-strong">发布管理</h1>
     <p class="text-[14px] text-fg-sub mt-1">监控多平台内容发布队列和状态</p>
 </div>
@@ -68,10 +68,37 @@
     </table>
 </div>
 
+<div class="rounded-3xl border border-border shadow-card overflow-hidden mt-6">
+    <div class="px-6 py-4 border-b border-border">
+        <h2 class="text-[15px] font-semibold text-fg-strong">最近发布事件</h2>
+    </div>
+    <table class="w-full text-[14px]">
+        <thead>
+            <tr class="border-b border-border text-left">
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">时间</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">平台</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">事件</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">状态变化</th>
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">说明</th>
+            </tr>
+        </thead>
+        <tbody hx-get="/web/partials/publish_events"
+               hx-trigger="load, every 5s"
+               hx-swap="innerHTML">
+            <tr>
+                <td colspan="5" class="px-6 py-12 text-center text-fg-sub text-[14px]">加载中...</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
 <script>
 function publishApp() {
     return {
         loading: false,
+        init() {
+            window.vfPublishApp = this;
+        },
 
         async loadTasks() {
             const tbody = document.querySelector('tbody[hx-get]');
@@ -82,12 +109,17 @@ function publishApp() {
             if (this.loading) return;
             this.loading = true;
             try {
-                await fetch('/api/distribute/replay', {
+                const response = await fetch('/api/distribute/replay', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ task_id: taskId, platform })
                 });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data?.detail?.message || '操作失败');
+                window.showToast?.('已加入重试队列', 'success');
                 await this.loadTasks();
+            } catch (error) {
+                window.showToast?.(error.message || '操作失败', 'error');
             } finally {
                 this.loading = false;
             }
@@ -95,6 +127,90 @@ function publishApp() {
 
         async retryTask(taskId, platform) {
             await this.executeTask(taskId, platform);
+        },
+
+        async retryJob(taskId, jobId) {
+            if (this.loading) return;
+            this.loading = true;
+            try {
+                const response = await fetch('/api/distribute/replay', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId, job_id: jobId })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data?.detail?.message || '重试失败');
+                window.showToast?.('已加入重试队列', 'success');
+                await this.loadTasks();
+            } catch (error) {
+                window.showToast?.(error.message || '重试失败', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async cancelJob(taskId, jobId, platform) {
+            if (this.loading) return;
+            this.loading = true;
+            try {
+                const response = await fetch('/api/distribute/cancel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId, job_id: jobId, platform })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data?.detail?.message || '取消失败');
+                window.showToast?.('任务已取消', 'success');
+                await this.loadTasks();
+            } catch (error) {
+                window.showToast?.(error.message || '取消失败', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async completeManual(taskId, jobId) {
+            const publishUrl = window.prompt('填写发布链接（可留空）', '');
+            if (publishUrl === null) return;
+
+            this.loading = true;
+            try {
+                const response = await fetch('/api/distribute/manual/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId, job_id: jobId, publish_url: publishUrl })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data?.detail?.message || '确认失败');
+                window.showToast?.('已确认手动发布', 'success');
+                await this.loadTasks();
+            } catch (error) {
+                window.showToast?.(error.message || '确认失败', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async failManual(taskId, jobId) {
+            const reason = window.prompt('填写失败原因', '手动发布失败');
+            if (reason === null) return;
+
+            this.loading = true;
+            try {
+                const response = await fetch('/api/distribute/manual/fail', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId, job_id: jobId, error: reason })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data?.detail?.message || '记录失败');
+                window.showToast?.('已记录手动发布失败', 'success');
+                await this.loadTasks();
+            } catch (error) {
+                window.showToast?.(error.message || '记录失败', 'error');
+            } finally {
+                this.loading = false;
+            }
         }
     };
 }

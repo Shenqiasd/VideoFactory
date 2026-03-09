@@ -78,6 +78,7 @@ def get_status_display(state: str) -> Dict[str, str]:
         TaskState.UPLOADING_PRODUCTS: {"text": "上传产品", "color": "text-fg", "bg": "bg-muted"},
         TaskState.READY_TO_PUBLISH: {"text": "待发布", "color": "text-fg-strong", "bg": "bg-muted"},
         TaskState.PUBLISHING: {"text": "发布中", "color": "text-fg", "bg": "bg-muted"},
+        TaskState.PARTIAL_SUCCESS: {"text": "部分成功", "color": "text-amber-700", "bg": "bg-amber-50"},
         TaskState.COMPLETED: {"text": "已完成", "color": "text-green-600", "bg": "bg-green-50"},
         TaskState.FAILED: {"text": "失败", "color": "text-red-600", "bg": "bg-red-50"},
     }
@@ -96,13 +97,13 @@ def calculate_task_progress(task: Dict) -> int:
             TaskState.QC_CHECKING: 65, TaskState.QC_PASSED: 75,
             TaskState.PROCESSING: 85, TaskState.UPLOADING_PRODUCTS: 92,
             TaskState.READY_TO_PUBLISH: 96,
-            TaskState.COMPLETED: 100, TaskState.FAILED: 0,
+            TaskState.PARTIAL_SUCCESS: 100, TaskState.COMPLETED: 100, TaskState.FAILED: 0,
         },
         "subtitle_dub": {
             TaskState.QUEUED: 0, TaskState.DOWNLOADING: 8, TaskState.DOWNLOADED: 15,
             TaskState.UPLOADING_SOURCE: 18, TaskState.TRANSLATING: 45,
             TaskState.QC_CHECKING: 80, TaskState.QC_PASSED: 90,
-            TaskState.COMPLETED: 100, TaskState.FAILED: 0,
+            TaskState.PARTIAL_SUCCESS: 100, TaskState.COMPLETED: 100, TaskState.FAILED: 0,
         },
         "dub_and_copy": {
             TaskState.QUEUED: 0, TaskState.DOWNLOADING: 5, TaskState.DOWNLOADED: 10,
@@ -110,7 +111,7 @@ def calculate_task_progress(task: Dict) -> int:
             TaskState.QC_CHECKING: 55, TaskState.QC_PASSED: 60,
             TaskState.PROCESSING: 75, TaskState.UPLOADING_PRODUCTS: 85,
             TaskState.READY_TO_PUBLISH: 95,
-            TaskState.COMPLETED: 100, TaskState.FAILED: 0,
+            TaskState.PARTIAL_SUCCESS: 100, TaskState.COMPLETED: 100, TaskState.FAILED: 0,
         },
         "full": {
             TaskState.QUEUED: 0, TaskState.DOWNLOADING: 5, TaskState.DOWNLOADED: 10,
@@ -118,7 +119,7 @@ def calculate_task_progress(task: Dict) -> int:
             TaskState.QC_CHECKING: 55, TaskState.QC_PASSED: 60,
             TaskState.PROCESSING: 70, TaskState.UPLOADING_PRODUCTS: 80,
             TaskState.READY_TO_PUBLISH: 85, TaskState.PUBLISHING: 95,
-            TaskState.COMPLETED: 100, TaskState.FAILED: 0,
+            TaskState.PARTIAL_SUCCESS: 100, TaskState.COMPLETED: 100, TaskState.FAILED: 0,
         },
     }
 
@@ -186,6 +187,12 @@ async def task_artifact_download_alias(task_id: str, artifact_id: str):
 async def publish_page(request: Request):
     """Publish management page"""
     return templates.TemplateResponse("publish.html", {"request": request})
+
+
+@router.get("/accounts", response_class=HTMLResponse)
+async def accounts_page(request: Request):
+    """Account management page"""
+    return templates.TemplateResponse("accounts.html", {"request": request})
 
 
 @router.get("/storage", response_class=HTMLResponse)
@@ -265,7 +272,7 @@ async def active_tasks_partial(request: Request):
         task["progress"] = calculate_task_progress(task)
         task["current_step"] = status["text"]
         task["can_pause"] = task["state"] in [TaskState.TRANSLATING, TaskState.PROCESSING]
-        task["can_cancel"] = task["state"] not in [TaskState.COMPLETED, TaskState.FAILED]
+        task["can_cancel"] = task["state"] not in [TaskState.COMPLETED, TaskState.FAILED, TaskState.PARTIAL_SUCCESS]
         task["scope_label"] = get_scope_label(task)
 
     return templates.TemplateResponse(
@@ -487,7 +494,7 @@ async def task_list_partial(request: Request, status: str = "all", platform: str
             TaskState.QC_CHECKING, TaskState.QUEUED
         ]
         task["can_retry"] = task["state"] == TaskState.FAILED
-        task["can_cancel"] = task["state"] not in [TaskState.COMPLETED, TaskState.FAILED]
+        task["can_cancel"] = task["state"] not in [TaskState.COMPLETED, TaskState.FAILED, TaskState.PARTIAL_SUCCESS]
         task["initial"] = task.get("source_title", "V")[0].upper() if task.get("source_title") else "V"
         task["title"] = task.get("source_title") or task.get("source_url", "未命名任务")
         task["platforms"] = task.get("target_platforms", [])
@@ -571,10 +578,10 @@ async def publish_stats_partial(request: Request):
     status_count = scheduler.get_queue_status()
 
     stats = {
-        "pending": status_count.get("pending", 0),
+        "pending": status_count.get("pending", 0) + status_count.get("manual_pending", 0),
         "publishing": status_count.get("publishing", 0),
         "done": status_count.get("done", 0),
-        "failed": status_count.get("failed", 0),
+        "failed": status_count.get("failed", 0) + status_count.get("cancelled", 0),
     }
 
     return templates.TemplateResponse(
@@ -587,9 +594,15 @@ async def publish_stats_partial(request: Request):
 async def publish_queue_partial(request: Request, platform: str = "all"):
     """Publish queue HTMX partial"""
     from api.routes.distribute import get_scheduler
+    from core.database import Database
 
     scheduler = get_scheduler()
-    all_jobs = [j.to_dict() for j in scheduler._queue if j.status in ("pending", "publishing", "failed")]
+    db = Database()
+    all_jobs = [
+        j.to_dict()
+        for j in scheduler._queue
+        if j.status in ("pending", "publishing", "manual_pending", "failed", "cancelled")
+    ]
 
     # Filter by platform
     if platform != "all":
@@ -608,8 +621,10 @@ async def publish_queue_partial(request: Request, platform: str = "all"):
     status_map = {
         "pending": {"text": "待发布", "class": "bg-muted text-fg"},
         "publishing": {"text": "发布中", "class": "bg-blue-50 text-blue-600"},
+        "manual_pending": {"text": "待人工确认", "class": "bg-amber-50 text-amber-700"},
         "done": {"text": "已完成", "class": "bg-green-50 text-green-600"},
         "failed": {"text": "失败", "class": "bg-red-50 text-red-600"},
+        "cancelled": {"text": "已取消", "class": "bg-zinc-100 text-zinc-600"},
     }
 
     # Enrich job data
@@ -618,13 +633,31 @@ async def publish_queue_partial(request: Request, platform: str = "all"):
         status_info = status_map.get(job.get("status", "pending"), status_map["pending"])
         job["status_text"] = status_info["text"]
         job["status_class"] = status_info["class"]
+        job["task_title"] = (
+            job.get("metadata", {}).get("title")
+            or job.get("product", {}).get("title")
+            or job.get("task_id", "")[:8]
+        )
+        account_id = job.get("metadata", {}).get("account_id", "")
+        account = db.get_account(account_id) if account_id else None
+        job["account_name"] = ""
+        job["account_status"] = ""
+        job["account_error"] = ""
+        if account:
+            job["account_name"] = account.get("name", "")
+            job["account_status"] = account.get("status", "")
+            job["account_error"] = account.get("last_error", "")
+        job["error_text"] = job.get("result", {}).get("error", "")
+        job["manual_checklist"] = job.get("result", {}).get("manual_checklist", {})
+        events = db.get_publish_job_events(job_id=job.get("job_id", ""), limit=1)
+        job["latest_event"] = events[0] if events else {}
 
         # Format scheduled time
-        if "scheduled_at" in job:
+        if "scheduled_time" in job:
             try:
-                scheduled = datetime.fromtimestamp(job["scheduled_at"])
+                scheduled = datetime.fromtimestamp(job["scheduled_time"])
                 job["scheduled_time"] = scheduled.strftime("%m-%d %H:%M")
-            except:
+            except Exception:
                 job["scheduled_time"] = "立即"
         else:
             job["scheduled_time"] = "立即"
@@ -632,4 +665,27 @@ async def publish_queue_partial(request: Request, platform: str = "all"):
     return templates.TemplateResponse(
         "partials/publish_queue.html",
         {"request": request, "jobs": all_jobs}
+    )
+
+
+@router.get("/web/partials/publish_events", response_class=HTMLResponse)
+async def publish_events_partial(request: Request, task_id: str = "", limit: int = 20):
+    from core.database import Database
+
+    db = Database()
+    events = db.get_publish_job_events(task_id=task_id, limit=max(1, min(limit, 50)))
+
+    for event in events:
+        if event.get("created_at"):
+            try:
+                created = datetime.fromisoformat(event["created_at"])
+                event["created_at_display"] = created.strftime("%m-%d %H:%M:%S")
+            except Exception:
+                event["created_at_display"] = event["created_at"]
+        else:
+            event["created_at_display"] = "-"
+
+    return templates.TemplateResponse(
+        "partials/publish_events.html",
+        {"request": request, "events": events, "task_id": task_id},
     )

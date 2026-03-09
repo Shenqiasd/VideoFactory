@@ -31,6 +31,7 @@ def live_server(tmp_path_factory):
     home_dir = tmp_path_factory.mktemp("vf-e2e-home")
     env = os.environ.copy()
     env["HOME"] = str(home_dir)
+    env["VF_DB_PATH"] = str(home_dir / "video_factory.db")
     env["PYTHONPATH"] = os.pathsep.join([str(PROJECT_ROOT), str(PROJECT_ROOT / "src")])
 
     base_url = "http://127.0.0.1:9010"
@@ -50,3 +51,11 @@ def live_server(tmp_path_factory):
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
+
+
+@pytest.fixture(scope="module")
+def live_server_home(tmp_path_factory):
+    candidates = sorted(tmp_path_factory.getbasetemp().glob("vf-e2e-home*"))
+    if not candidates:
+        pytest.skip("未找到 E2E 隔离 HOME")
+    return candidates[-1]

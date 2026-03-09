@@ -50,45 +50,29 @@ class CreateTaskRequest(BaseModel):
 
 @router.post("/api/publish/tasks")
 async def create_publish_task(request: CreateTaskRequest):
-    """创建发布任务"""
-    scheduler = get_scheduler()
-    job = scheduler._create_job(
-        task_id=request.task_id,
-        platform=request.platform,
-        scheduled_time=request.scheduled_time,
-        product=request.product
+    """兼容旧接口，提示迁移到 distribute API。"""
+    raise HTTPException(
+        status_code=410,
+        detail="旧接口已废弃，请改用 /api/distribute/publish 和 /api/distribute/queue"
     )
-    scheduler._queue.append(job)
-    scheduler._save_queue()
-
-    return {"message": "任务已创建", "job": job.to_dict()}
 
 
 @router.get("/api/publish/tasks")
 async def get_publish_tasks(status: Optional[str] = None):
-    """获取发布任务列表"""
-    scheduler = get_scheduler()
-    jobs = scheduler._queue
-
-    if status:
-        jobs = [j for j in jobs if j.status == status]
-
-    return {"tasks": [j.to_dict() for j in jobs], "total": len(jobs)}
+    """兼容旧接口，提示迁移到 distribute API。"""
+    raise HTTPException(
+        status_code=410,
+        detail="旧接口已废弃，请改用 /api/distribute/queue"
+    )
 
 
 @router.delete("/api/publish/tasks/{task_id}")
 async def delete_publish_task(task_id: str):
-    """删除发布任务"""
-    scheduler = get_scheduler()
-    initial_count = len(scheduler._queue)
-    scheduler._queue = [j for j in scheduler._queue if j.task_id != task_id]
-    deleted = initial_count - len(scheduler._queue)
-
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="任务不存在")
-
-    scheduler._save_queue()
-    return {"message": f"已删除 {deleted} 个任务", "deleted_count": deleted}
+    """兼容旧接口，提示迁移到 distribute API。"""
+    raise HTTPException(
+        status_code=410,
+        detail="旧接口已废弃，请改用 /api/distribute/cancel"
+    )
 
 
 @router.post("/api/publish/accounts/{id}/test")

@@ -2,6 +2,7 @@
 发布模块 - 封装 social-auto-upload 进行多平台发布
 支持: 抖音、B站、小红书、YouTube、视频号
 """
+from __future__ import annotations
 import asyncio
 import json
 import logging
@@ -13,7 +14,7 @@ from typing import Optional, Dict, Any, List
 import httpx
 
 from core.config import Config
-from core.task import TaskStore
+from core.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -209,10 +210,12 @@ class SocialAutoUploadPublisher(PlatformPublisher):
             "tags": tags or [],
             "cover_path": cover_path,
             "task_id": kwargs.get("task_id", ""),
+            "job_id": kwargs.get("job_id", ""),
             "product_type": kwargs.get("product_type", ""),
             "idempotency_key": kwargs.get("idempotency_key", ""),
             "r2_path": kwargs.get("r2_path", ""),
             "r2_cover_path": kwargs.get("r2_cover_path", ""),
+            "account": kwargs.get("account", {}),
         }
         return await self.adapter.publish(self.platform, payload, **kwargs)
 
@@ -241,7 +244,9 @@ class ManualPublisher(PlatformPublisher):
             "cover_path": cover_path,
             "status": "待手动发布",
             "task_id": kwargs.get("task_id", ""),
+            "job_id": kwargs.get("job_id", ""),
             "idempotency_key": kwargs.get("idempotency_key", ""),
+            "account": kwargs.get("account", {}),
         }
         logger.info("📋 生成手动发布清单: %s - %s", self.platform, title)
         return {"success": True, "url": "", "error": "", "manual_checklist": checklist, "executor": "manual"}
@@ -253,6 +258,7 @@ class PublishManager:
     def __init__(self):
         config = Config()
         self._publishers: Dict[str, PlatformPublisher] = {}
+        self.db = Database()
 
         default_platforms = ["bilibili", "douyin", "xiaohongshu", "youtube"]
         auto_publish_enabled = config.get("distribute", "auto_publish", default=False)
@@ -281,6 +287,41 @@ class PublishManager:
     def set_publisher(self, platform: str, publisher: PlatformPublisher):
         self._publishers[platform] = publisher
 
+    def _resolve_account(self, platform: str, selected_account_id: str = "") -> Dict[str, Any]:
+        account = None
+        if selected_account_id:
+            account = self.db.get_account(selected_account_id)
+            if not account:
+                return {"ok": False, "error": f"指定账号不存在: {selected_account_id}"}
+            if account.get("platform") != platform:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"账号与平台不匹配: {account.get('name', selected_account_id)} "
+                        f"属于 {account.get('platform', 'unknown')}，不能用于 {platform}"
+                    ),
+                }
+
+        if account is None:
+            account = self.db.get_preferred_account(platform)
+        if not account:
+            return {"ok": False, "error": f"平台 {platform} 未配置默认账号"}
+
+        capabilities = account.get("capabilities", {})
+        if account.get("status") != "active":
+            return {
+                "ok": False,
+                "error": f"账号不可用: {account.get('name', account.get('id', 'unknown'))} ({account.get('last_error', '未验证')})",
+            }
+
+        if not capabilities.get("cookie_exists"):
+            return {
+                "ok": False,
+                "error": f"账号 Cookie 不可用: {account.get('name', account.get('id', 'unknown'))}",
+            }
+
+        return {"ok": True, "account": account}
+
     async def publish_to_platform(
         self,
         platform: str,
@@ -295,12 +336,24 @@ class PublishManager:
         if not publisher:
             return {"success": False, "url": "", "error": f"未配置平台: {platform}"}
 
+        account_result = self._resolve_account(platform, kwargs.get("account_id", ""))
+        if not account_result["ok"]:
+            return {"success": False, "url": "", "error": account_result["error"]}
+        account = account_result["account"]
+
         return await publisher.publish(
             video_path=video_path,
             title=title,
             description=description,
             tags=tags,
             cover_path=cover_path,
+            account={
+                "id": account["id"],
+                "name": account["name"],
+                "platform": account["platform"],
+                "cookie_path": account.get("cookie_path", ""),
+                "is_default": account.get("is_default", False),
+            },
             **kwargs,
         )
 
