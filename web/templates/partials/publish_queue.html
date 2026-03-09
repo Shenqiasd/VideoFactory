@@ -1,0 +1,56 @@
+{% if jobs %}
+    {% for job in jobs %}
+    <tr class="border-b border-border hover:bg-muted/30 transition">
+        <td class="px-6 py-4">
+            <div class="font-medium text-fg-strong">{{ job.task_title or job.task_id[:8] }}</div>
+            <div class="text-[12px] text-fg-sub mt-0.5">{{ job.product_type }}</div>
+        </td>
+        <td class="px-6 py-4">
+            <span class="inline-flex items-center px-2 py-1 rounded-lg bg-muted text-[12px] text-fg">
+                {{ job.platform_label }}
+            </span>
+        </td>
+        <td class="px-6 py-4 text-fg-sub">{{ job.product_type }}</td>
+        <td class="px-6 py-4 text-fg-sub text-[13px]">{{ job.scheduled_time }}</td>
+        <td class="px-6 py-4">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] font-medium {{ job.status_class }}">
+                {% if job.status == 'pending' %}
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/></svg>
+                {% elif job.status == 'publishing' %}
+                <svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M4 12a8 8 0 018-8"/></svg>
+                {% elif job.status == 'done' %}
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                {% elif job.status == 'failed' %}
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/></svg>
+                {% endif %}
+                {{ job.status_text }}
+            </span>
+        </td>
+        <td class="px-6 py-4">
+            <div class="flex gap-2">
+                {% if job.status == 'failed' %}
+                <button @click="$root.retryTask('{{ job.task_id }}', '{{ job.platform }}')"
+                        :disabled="$root.loading"
+                        class="px-2.5 py-1 text-[12px] text-blue-600 hover:bg-blue-50 rounded-lg transition font-medium disabled:opacity-50">
+                    重试
+                </button>
+                {% endif %}
+                {% if job.status in ['pending', 'publishing'] %}
+                <button hx-post="/api/distribute/cancel"
+                        hx-vals='{"task_id": "{{ job.task_id }}", "platform": "{{ job.platform }}"}'
+                        hx-confirm="确定取消此任务？"
+                        class="px-2.5 py-1 text-[12px] text-fg-sub hover:text-red-600 hover:bg-red-50 rounded-lg transition font-medium">
+                    取消
+                </button>
+                {% endif %}
+            </div>
+        </td>
+    </tr>
+    {% endfor %}
+{% else %}
+    <tr>
+        <td colspan="6" class="px-6 py-16 text-center text-fg-sub text-[14px]">
+            暂无发布任务
+        </td>
+    </tr>
+{% endif %}

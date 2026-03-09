@@ -49,7 +49,7 @@ class SubmitAndRunRequest(BaseModel):
     target_lang: str = Field("zh_cn", description="目标语言")
     enable_tts: bool = Field(True, description="启用配音")
     embed_subtitle_type: str = Field("horizontal", description="字幕类型")
-    subtitle_style: dict | None = Field(None, description="字幕样式")
+    subtitle_style: Optional[dict] = Field(None, description="字幕样式")
 
 
 # ========== 后台任务 ==========

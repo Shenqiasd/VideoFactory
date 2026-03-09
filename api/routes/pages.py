@@ -560,3 +560,76 @@ async def recent_completed_partial(request: Request):
             "tasks": recent_tasks
         }
     )
+
+
+@router.get("/web/partials/publish_stats", response_class=HTMLResponse)
+async def publish_stats_partial(request: Request):
+    """Publish stats HTMX partial"""
+    from api.routes.distribute import get_scheduler
+
+    scheduler = get_scheduler()
+    status_count = scheduler.get_queue_status()
+
+    stats = {
+        "pending": status_count.get("pending", 0),
+        "publishing": status_count.get("publishing", 0),
+        "done": status_count.get("done", 0),
+        "failed": status_count.get("failed", 0),
+    }
+
+    return templates.TemplateResponse(
+        "partials/publish_stats.html",
+        {"request": request, "stats": stats}
+    )
+
+
+@router.get("/web/partials/publish_queue", response_class=HTMLResponse)
+async def publish_queue_partial(request: Request, platform: str = "all"):
+    """Publish queue HTMX partial"""
+    from api.routes.distribute import get_scheduler
+
+    scheduler = get_scheduler()
+    all_jobs = [j.to_dict() for j in scheduler._queue if j.status in ("pending", "publishing", "failed")]
+
+    # Filter by platform
+    if platform != "all":
+        all_jobs = [j for j in all_jobs if j.get("platform") == platform]
+
+    # Platform labels
+    platform_labels = {
+        "bilibili": "B站",
+        "douyin": "抖音",
+        "xiaohongshu": "小红书",
+        "youtube": "YouTube",
+        "weixin": "视频号"
+    }
+
+    # Status display
+    status_map = {
+        "pending": {"text": "待发布", "class": "bg-muted text-fg"},
+        "publishing": {"text": "发布中", "class": "bg-blue-50 text-blue-600"},
+        "done": {"text": "已完成", "class": "bg-green-50 text-green-600"},
+        "failed": {"text": "失败", "class": "bg-red-50 text-red-600"},
+    }
+
+    # Enrich job data
+    for job in all_jobs:
+        job["platform_label"] = platform_labels.get(job.get("platform", ""), job.get("platform", ""))
+        status_info = status_map.get(job.get("status", "pending"), status_map["pending"])
+        job["status_text"] = status_info["text"]
+        job["status_class"] = status_info["class"]
+
+        # Format scheduled time
+        if "scheduled_at" in job:
+            try:
+                scheduled = datetime.fromtimestamp(job["scheduled_at"])
+                job["scheduled_time"] = scheduled.strftime("%m-%d %H:%M")
+            except:
+                job["scheduled_time"] = "立即"
+        else:
+            job["scheduled_time"] = "立即"
+
+    return templates.TemplateResponse(
+        "partials/publish_queue.html",
+        {"request": request, "jobs": all_jobs}
+    )

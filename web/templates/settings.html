@@ -323,30 +323,69 @@
             <!-- Publish -->
             <div x-show="active === 'publish'" x-transition x-cloak>
                 <h2 class="text-[15px] font-semibold text-fg-strong mb-5">发布配置</h2>
-                <div class="space-y-5">
-                    <div>
-                        <label class="block text-[13px] font-medium text-fg-strong mb-2">默认平台</label>
-                        <div class="flex flex-wrap gap-2">
-                            {% for val, label in [('bilibili','B站'), ('douyin','抖音'), ('xiaohongshu','小红书'), ('youtube','YouTube')] %}
-                            <label class="inline-flex items-center px-3 py-1.5 rounded-xl border border-border text-[13px] cursor-pointer hover:bg-muted transition has-[:checked]:bg-fg-strong has-[:checked]:text-white has-[:checked]:border-fg-strong">
-                                <input type="checkbox" class="sr-only" />
-                                {{ label }}
-                            </label>
-                            {% endfor %}
+                <div class="space-y-4">
+                    <div class="rounded-2xl border border-border p-4 space-y-3">
+                        <h3 class="text-[13px] font-semibold text-fg-strong">平台配置</h3>
+                        <div>
+                            <label class="block text-[12px] text-fg-sub mb-2">默认发布平台</label>
+                            <div class="flex flex-wrap gap-2">
+                                {% for val, label in [('bilibili','B站'), ('douyin','抖音'), ('xiaohongshu','小红书'), ('youtube','YouTube'), ('weixin','视频号')] %}
+                                <label class="inline-flex items-center px-3 py-1.5 rounded-xl border border-border text-[13px] cursor-pointer hover:bg-muted transition has-[:checked]:bg-fg-strong has-[:checked]:text-white has-[:checked]:border-fg-strong">
+                                    <input id="publish-platform-{{ val }}" type="checkbox" class="sr-only" />
+                                    {{ label }}
+                                </label>
+                                {% endfor %}
+                            </div>
                         </div>
                     </div>
-                    <div>
-                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">发布间隔（秒）</label>
-                        <input type="number" value="300" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none" />
+
+                    <div class="rounded-2xl border border-border p-4 space-y-3">
+                        <h3 class="text-[13px] font-semibold text-fg-strong">调度配置</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">发布间隔（秒）</label>
+                                <input id="publish-interval" type="number" min="60" value="300" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">最大重试次数</label>
+                                <input id="publish-max-retries" type="number" min="0" max="10" value="3" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">重试延迟（秒）</label>
+                                <input id="publish-retry-delay" type="number" min="10" value="60" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1.5">并发任务数</label>
+                                <input id="publish-concurrent" type="number" min="1" max="5" value="2" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                        </div>
+                        <label class="flex items-center justify-between rounded-xl border border-border px-3 py-2 cursor-pointer">
+                            <span class="text-[13px] text-fg">启用自动发布</span>
+                            <input id="publish-auto-enabled" type="checkbox" checked class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                        </label>
                     </div>
-                    <div>
-                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">最大重试次数</label>
-                        <input type="number" value="3" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none" />
+
+                    <div class="rounded-2xl border border-border p-4 space-y-3">
+                        <h3 class="text-[13px] font-semibold text-fg-strong">内容配置</h3>
+                        <div>
+                            <label class="block text-[12px] text-fg-sub mb-1.5">默认标题模板</label>
+                            <input id="publish-title-template" type="text" placeholder="{title}" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                        </div>
+                        <div>
+                            <label class="block text-[12px] text-fg-sub mb-1.5">默认标签（逗号分隔）</label>
+                            <input id="publish-default-tags" type="text" placeholder="视频,教程" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                        </div>
+                        <label class="flex items-center justify-between rounded-xl border border-border px-3 py-2 cursor-pointer">
+                            <span class="text-[13px] text-fg">自动添加水印</span>
+                            <input id="publish-auto-watermark" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                        </label>
                     </div>
                 </div>
                 <div class="flex justify-end gap-3 mt-8">
-                    <button class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">重置</button>
-                    <button class="h-9 px-5 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong shadow-btn transition">保存</button>
+                    <button type="button" onclick="resetPublishForm()" class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">重置</button>
+                    <button type="button" onclick="savePublishSettings()" class="h-9 px-5 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong shadow-btn transition">保存</button>
                 </div>
             </div>
 
@@ -783,8 +822,82 @@
     window.testTranslation = testTranslation;
     window.testTTS = testTTS;
 
+    // Publish Settings
+    const publishEndpoint = '/api/system/settings/publish';
+
+    function getPublishPlatforms() {
+        const platforms = [];
+        ['bilibili', 'douyin', 'xiaohongshu', 'youtube', 'weixin'].forEach(p => {
+            if (byId(`publish-platform-${p}`)?.checked) platforms.push(p);
+        });
+        return platforms;
+    }
+
+    function buildPublishPayload() {
+        return {
+            platforms: getPublishPlatforms(),
+            interval: readNumber('publish-interval', 300),
+            max_retries: readNumber('publish-max-retries', 3),
+            retry_delay: readNumber('publish-retry-delay', 60),
+            concurrent: readNumber('publish-concurrent', 2),
+            auto_enabled: !!byId('publish-auto-enabled')?.checked,
+            title_template: byId('publish-title-template')?.value || '{title}',
+            default_tags: readCsvInput('publish-default-tags'),
+            auto_watermark: !!byId('publish-auto-watermark')?.checked
+        };
+    }
+
+    function applyPublishSettings(data) {
+        if (!data) return;
+        (data.platforms || []).forEach(p => setChecked(`publish-platform-${p}`, true));
+        setValue('publish-interval', data.interval || 300);
+        setValue('publish-max-retries', data.max_retries || 3);
+        setValue('publish-retry-delay', data.retry_delay || 60);
+        setValue('publish-concurrent', data.concurrent || 2);
+        setChecked('publish-auto-enabled', data.auto_enabled !== false);
+        setValue('publish-title-template', data.title_template || '{title}');
+        setValue('publish-default-tags', (data.default_tags || []).join(','));
+        setChecked('publish-auto-watermark', data.auto_watermark);
+    }
+
+    async function loadPublishSettings() {
+        try {
+            const response = await fetch(publishEndpoint, { method: 'GET' });
+            if (response.ok) {
+                const data = await response.json();
+                applyPublishSettings(data);
+            }
+        } catch (error) {
+            console.error('Failed to load publish settings:', error);
+        }
+    }
+
+    async function savePublishSettings() {
+        try {
+            const response = await fetch(publishEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildPublishPayload())
+            });
+            if (!response.ok) throw new Error('save_failed');
+            const data = await response.json();
+            applyPublishSettings(data);
+            showToast('发布配置已保存', 'success');
+        } catch (error) {
+            showToast('保存失败', 'error');
+        }
+    }
+
+    async function resetPublishForm() {
+        await loadPublishSettings();
+    }
+
+    window.savePublishSettings = savePublishSettings;
+    window.resetPublishForm = resetPublishForm;
+
     document.addEventListener('DOMContentLoaded', () => {
         loadAsrTtsSettings();
+        loadPublishSettings();
     });
 </script>
 {% endblock %}

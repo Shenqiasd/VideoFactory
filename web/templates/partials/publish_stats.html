@@ -1,0 +1,18 @@
+<div class="grid grid-cols-4 gap-4 mb-6">
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">待发布</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">{{ stats.pending }}</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">发布中</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">{{ stats.publishing }}</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">今日成功</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">{{ stats.done }}</div>
+    </div>
+    <div class="rounded-3xl border border-border px-5 py-4">
+        <div class="text-[12px] text-fg-sub">失败</div>
+        <div class="text-[24px] font-bold text-fg-strong mt-1">{{ stats.failed }}</div>
+    </div>
+</div>

@@ -3,35 +3,37 @@
 {% block nav_publish %}active{% endblock %}
 
 {% block content %}
-<div class="mb-8">
+<div x-data="publishApp()" class="mb-8">
     <h1 class="text-[21px] font-bold text-fg-strong">发布管理</h1>
     <p class="text-[14px] text-fg-sub mt-1">监控多平台内容发布队列和状态</p>
 </div>
 
 <!-- Stats -->
-<div class="grid grid-cols-4 gap-4 mb-6">
-    <div class="rounded-3xl border border-border px-5 py-4">
-        <div class="text-[12px] text-fg-sub">待发布</div>
-        <div class="text-[24px] font-bold text-fg-strong mt-1">0</div>
-    </div>
-    <div class="rounded-3xl border border-border px-5 py-4">
-        <div class="text-[12px] text-fg-sub">发布中</div>
-        <div class="text-[24px] font-bold text-fg-strong mt-1">0</div>
-    </div>
-    <div class="rounded-3xl border border-border px-5 py-4">
-        <div class="text-[12px] text-fg-sub">今日成功</div>
-        <div class="text-[24px] font-bold text-fg-strong mt-1">0</div>
-    </div>
-    <div class="rounded-3xl border border-border px-5 py-4">
-        <div class="text-[12px] text-fg-sub">失败</div>
-        <div class="text-[24px] font-bold text-fg-strong mt-1">0</div>
+<div hx-get="/web/partials/publish_stats" hx-trigger="load, every 5s" hx-swap="innerHTML">
+    <div class="grid grid-cols-4 gap-4 mb-6">
+        <div class="rounded-3xl border border-border px-5 py-4 animate-pulse">
+            <div class="h-3 bg-muted rounded w-12 mb-2"></div>
+            <div class="h-6 bg-muted rounded w-8"></div>
+        </div>
+        <div class="rounded-3xl border border-border px-5 py-4 animate-pulse">
+            <div class="h-3 bg-muted rounded w-12 mb-2"></div>
+            <div class="h-6 bg-muted rounded w-8"></div>
+        </div>
+        <div class="rounded-3xl border border-border px-5 py-4 animate-pulse">
+            <div class="h-3 bg-muted rounded w-12 mb-2"></div>
+            <div class="h-6 bg-muted rounded w-8"></div>
+        </div>
+        <div class="rounded-3xl border border-border px-5 py-4 animate-pulse">
+            <div class="h-3 bg-muted rounded w-12 mb-2"></div>
+            <div class="h-6 bg-muted rounded w-8"></div>
+        </div>
     </div>
 </div>
 
 <!-- Platform Filter -->
 <div class="flex gap-1 p-1 bg-muted rounded-2xl mb-5 w-fit" x-data="{ tab: 'all' }">
     {% for val, label in [('all','全部'), ('bilibili','B站'), ('douyin','抖音'), ('xiaohongshu','小红书'), ('youtube','YouTube'), ('weixin','视频号')] %}
-    <button @click="tab = '{{ val }}'"
+    <button @click="tab = '{{ val }}'; $dispatch('filter-platform', { platform: '{{ val }}' })"
             :class="tab === '{{ val }}' ? 'bg-white shadow-md text-fg-strong font-semibold' : 'text-fg-sub hover:text-fg hover:bg-white/40'"
             class="px-3 py-1.5 rounded-xl text-[13px] transition">
         {{ label }}
@@ -52,13 +54,49 @@
                 <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">操作</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody hx-get="/web/partials/publish_queue?platform=all"
+               hx-trigger="load, every 3s"
+               hx-swap="innerHTML"
+               x-data
+               @filter-platform.window="$el.setAttribute('hx-get', '/web/partials/publish_queue?platform=' + $event.detail.platform); htmx.trigger($el, 'load')">
             <tr>
                 <td colspan="6" class="px-6 py-16 text-center text-fg-sub text-[14px]">
-                    暂无发布任务
+                    <div class="animate-pulse">加载中...</div>
                 </td>
             </tr>
         </tbody>
     </table>
 </div>
+
+<script>
+function publishApp() {
+    return {
+        loading: false,
+
+        async loadTasks() {
+            const tbody = document.querySelector('tbody[hx-get]');
+            if (tbody) htmx.trigger(tbody, 'load');
+        },
+
+        async executeTask(taskId, platform) {
+            if (this.loading) return;
+            this.loading = true;
+            try {
+                await fetch('/api/distribute/replay', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId, platform })
+                });
+                await this.loadTasks();
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async retryTask(taskId, platform) {
+            await this.executeTask(taskId, platform);
+        }
+    };
+}
+</script>
 {% endblock %}

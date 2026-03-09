@@ -1,0 +1,504 @@
+{% extends "base.html" %}
+{% block title %}新建任务 - 视频工厂{% endblock %}
+{% block nav_new_task %}active{% endblock %}
+
+{% block content %}
+<div class="max-w-[660px] mx-auto">
+    <div class="mb-8">
+        <h1 class="text-[21px] font-bold text-fg-strong">创建新任务</h1>
+        <p class="text-[14px] text-fg-sub mt-1">输入 YouTube 视频 URL，选择任务范围开始处理</p>
+    </div>
+
+    <div class="rounded-3xl border border-border p-6 shadow-card" x-data="vfTaskForm()">
+        <!-- Mode Tabs -->
+        <div class="flex gap-1 p-1 bg-muted rounded-2xl mb-6 w-fit">
+            <button @click="mode = 'single'"
+                    :class="mode === 'single' ? 'bg-white shadow-md text-fg-strong font-semibold' : 'text-fg-sub hover:text-fg hover:bg-white/40'"
+                    class="px-4 py-1.5 rounded-xl text-[13px] transition">
+                单个视频
+            </button>
+            <button @click="mode = 'batch'"
+                    :class="mode === 'batch' ? 'bg-white shadow-md text-fg-strong font-semibold' : 'text-fg-sub hover:text-fg hover:bg-white/40'"
+                    class="px-4 py-1.5 rounded-xl text-[13px] transition">
+                批量导入
+            </button>
+        </div>
+
+        <!-- Single Mode -->
+        <div x-show="mode === 'single'" x-transition>
+            <form hx-post="/api/tasks/create" hx-swap="none"
+                  hx-on::after-request="if(event.detail.successful) { showToast('任务创建成功，等待 Worker 处理', 'success'); setTimeout(function(){location.href='/tasks'},800); }">
+
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">YouTube URL</label>
+                        <input type="url" name="youtube_url" required x-model="youtubeUrl"
+                               placeholder="https://www.youtube.com/watch?v=..."
+                               class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition" />
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-[13px] font-medium text-fg-strong mb-1.5">源语言</label>
+                            <select name="source_lang" x-model="sourceLang" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none">
+                                <option value="en">英语</option>
+                                <option value="ja">日语</option>
+                                <option value="ko">韩语</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[13px] font-medium text-fg-strong mb-1.5">目标语言</label>
+                            <select name="target_lang" x-model="targetLang" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none">
+                                <option value="zh_cn">中文</option>
+                                <option value="en">英语</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 任务范围选择 -->
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-2">任务范围</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="relative cursor-pointer">
+                                <input type="radio" name="task_scope" value="subtitle_only" class="sr-only peer" @change="scope = 'subtitle_only'" />
+                                <div class="rounded-2xl border-2 border-border px-4 py-3
+                                            peer-checked:border-black peer-checked:bg-muted-dark transition">
+                                    <div class="text-[13px] font-semibold text-fg-strong">仅翻译字幕</div>
+                                    <div class="text-[11px] text-fg-sub mt-0.5">生成无配音的字幕视频</div>
+                                </div>
+                            </label>
+                            <label class="relative cursor-pointer">
+                                <input type="radio" name="task_scope" value="subtitle_dub" class="sr-only peer" @change="scope = 'subtitle_dub'" />
+                                <div class="rounded-2xl border-2 border-border px-4 py-3
+                                            peer-checked:border-black peer-checked:bg-muted-dark transition">
+                                    <div class="text-[13px] font-semibold text-fg-strong">翻译+配音</div>
+                                    <div class="text-[11px] text-fg-sub mt-0.5">字幕 + TTS 音频 + 视频合成</div>
+                                </div>
+                            </label>
+                            <label class="relative cursor-pointer">
+                                <input type="radio" name="task_scope" value="dub_and_copy" class="sr-only peer" @change="scope = 'dub_and_copy'" />
+                                <div class="rounded-2xl border-2 border-border px-4 py-3
+                                            peer-checked:border-black peer-checked:bg-muted-dark transition">
+                                    <div class="text-[13px] font-semibold text-fg-strong">翻译+配音+文案</div>
+                                    <div class="text-[11px] text-fg-sub mt-0.5">上面 + 短视频/封面/图文</div>
+                                </div>
+                            </label>
+                            <label class="relative cursor-pointer">
+                                <input type="radio" name="task_scope" value="full" class="sr-only peer" checked @change="scope = 'full'" />
+                                <div class="rounded-2xl border-2 border-border px-4 py-3
+                                            peer-checked:border-black peer-checked:bg-muted-dark transition">
+                                    <div class="text-[13px] font-semibold text-fg-strong">全流程</div>
+                                    <div class="text-[11px] text-fg-sub mt-0.5">上面 + 多平台自动发布</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 视频选择 -->
+                    <div x-show="scope === 'full'" x-transition x-cloak>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">选择已完成的视频</label>
+                        <select name="completed_task_id" x-model="selectedVideo" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none">
+                            <option value="">从已完成任务中选择...</option>
+                            <template x-for="task in completedTasks" :key="task.id">
+                                <option :value="task.id" x-text="task.title"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- 平台选择 -->
+                    <div x-show="scope === 'full'" x-transition x-cloak>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">发布平台</label>
+                        <div class="flex flex-wrap gap-2">
+                            <template x-for="platform in platforms" :key="platform.value">
+                                <label class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border text-[13px] cursor-pointer hover:bg-muted transition has-[:checked]:bg-fg-strong has-[:checked]:text-white has-[:checked]:border-fg-strong">
+                                    <input type="checkbox" :value="platform.value" @change="onPlatformChange" class="sr-only" />
+                                    <span x-text="platform.label"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- 账号选择 -->
+                    <div x-show="scope === 'full' && selectedPlatforms.length > 0" x-transition x-cloak>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">选择账号</label>
+                        <template x-for="platform in selectedPlatforms" :key="platform">
+                            <div class="mb-3">
+                                <label class="block text-[12px] text-fg-sub mb-1" x-text="platforms.find(p => p.value === platform)?.label"></label>
+                                <select :name="'account_' + platform" class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none">
+                                    <option value="">选择账号...</option>
+                                    <template x-for="account in accountsByPlatform[platform] || []" :key="account.id">
+                                        <option :value="account.id" x-text="account.name"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- 发布信息 -->
+                    <div x-show="scope === 'full'" x-transition x-cloak>
+                        <div class="space-y-4">
+                            <!-- 标题 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">发布标题 <span class="text-red-500">*</span></label>
+                                <input type="text" name="publish_title" x-model="publishTitle" required
+                                       placeholder="输入视频标题"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition" />
+                            </div>
+
+                            <!-- 描述 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">视频描述</label>
+                                <textarea name="publish_description" x-model="publishDescription" rows="4"
+                                          placeholder="输入视频描述（可选）"
+                                          class="w-full px-4 py-3 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition resize-none"></textarea>
+
+                            <!-- 标签 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">标签</label>
+                                <input type="text" name="publish_tags" x-model="publishTags"
+                                       placeholder="用逗号分隔，如：科技,AI,教程"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition" />
+                            </div>
+
+                            <!-- 封面 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">封面图片</label>
+                                <input type="file" name="publish_cover" accept="image/*" @change="onCoverChange"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong file:mr-4 file:py-1 file:px-3 file:rounded-xl file:border-0 file:text-[13px] file:bg-muted file:text-fg-strong hover:file:bg-muted-dark cursor-pointer" />
+                                <div x-show="coverPreview" x-cloak class="mt-2">
+                                    <img :src="coverPreview" class="w-32 h-32 object-cover rounded-xl border border-border" />
+                                </div>
+                            </div>
+
+                            <!-- 发布时间 -->
+                            <div>
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">发布时间</label>
+                                <input type="datetime-local" name="publish_time" x-model="publishTime"
+                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[14px] text-fg-strong outline-none focus:border-fg-sub transition" />
+                                <p class="text-[11px] text-fg-sub mt-1">留空则立即发布</p>
+                            </div>
+                        </div>
+                    </div>
+                            </div>
+
+                    <!-- 字幕样式 -->
+                    <div class="rounded-2xl border border-border px-4 py-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <label class="block text-[13px] font-medium text-fg-strong">字幕样式</label>
+                            <button type="button"
+                                    @click="previewSubtitle()"
+                                    :disabled="previewLoading"
+                                    class="h-8 px-3 rounded-xl border border-border text-[12px] font-medium text-fg-strong hover:bg-muted transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                <span x-show="!previewLoading">预览样式</span>
+                                <span x-show="previewLoading" x-cloak>生成中...</span>
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1">中文字号</label>
+                                <input type="number" name="subtitle_cn_font_size" x-model.number="style.cn_font_size" min="12" max="96"
+                                       class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1">英文字号</label>
+                                <input type="number" name="subtitle_en_font_size" x-model.number="style.en_font_size" min="10" max="96"
+                                       class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1">中文位置（底部边距）</label>
+                                <input type="number" name="subtitle_cn_margin_v" x-model.number="style.cn_margin_v" min="0" max="400"
+                                       class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1">英文位置（底部边距）</label>
+                                <input type="number" name="subtitle_en_margin_v" x-model.number="style.en_margin_v" min="0" max="400"
+                                       class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1">中文对齐</label>
+                                <select name="subtitle_cn_alignment" x-model.number="style.cn_alignment"
+                                        class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none">
+                                    <option value="2">底部居中</option>
+                                    <option value="8">顶部居中</option>
+                                    <option value="5">居中</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[12px] text-fg-sub mb-1">英文对齐</label>
+                                <select name="subtitle_en_alignment" x-model.number="style.en_alignment"
+                                        class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none">
+                                    <option value="2">底部居中</option>
+                                    <option value="8">顶部居中</option>
+                                    <option value="5">居中</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mt-3 text-[12px] text-fg-sub" x-show="previewError" x-text="previewError"></div>
+                        <div class="mt-3 rounded-xl border border-border bg-black/5 p-2" x-show="previewUrl" x-cloak>
+                            <video class="w-full rounded-lg bg-black" controls :src="previewUrl"></video>
+                        </div>
+                        <div class="mt-2 rounded-xl border border-border bg-muted p-3 text-[11px] text-fg-sub"
+                             x-show="previewDebug && previewDebug.font_used" x-cloak>
+                            <details>
+                                <summary class="cursor-pointer text-fg">渲染调试信息</summary>
+                                <div class="mt-2 space-y-1">
+                                    <div>请求字体: <span class="text-fg-strong" x-text="previewDebug.font_requested || '-'"></span></div>
+                                    <div>实际字体: <span class="text-fg-strong" x-text="previewDebug.font_used || '-'"></span></div>
+                                    <div>可见性评分: <span class="text-fg-strong" x-text="previewDebug.visibility_score ?? '-'"></span></div>
+                                    <div>字幕时间窗: <span class="text-fg-strong" x-text="previewDebug.cue_window || '-'"></span></div>
+                                    <div>预览ID: <span class="text-fg-strong" x-text="previewDebug.preview_id || '-'"></span></div>
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+
+                    <!-- 发布平台（仅 full 时显示） -->
+                    <div x-show="scope === 'full'" x-transition x-cloak>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-2">发布平台</label>
+                        <div class="flex flex-wrap gap-2">
+                            {% for p in [('bilibili','B站'),('douyin','抖音'),('xiaohongshu','小红书'),('youtube','YouTube'),('weixin','视频号')] %}
+                            <label class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border text-[13px] cursor-pointer hover:bg-muted transition has-[:checked]:bg-fg-strong has-[:checked]:text-white has-[:checked]:border-fg-strong">
+                                <input type="checkbox" name="platforms" value="{{ p[0] }}" class="sr-only" />
+                                {{ p[1] }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- 加工选项（仅 dub_and_copy / full 时显示） -->
+                    <div x-show="scope === 'dub_and_copy' || scope === 'full'" x-transition x-cloak>
+                        <div class="h-px bg-border"></div>
+                        <div class="mt-5">
+                            <label class="block text-[13px] font-medium text-fg-strong mb-2">加工选项</label>
+                            <div class="space-y-2">
+                                <label class="flex items-center gap-2.5 text-[14px] cursor-pointer">
+                                    <input type="hidden" name="create_clips" value="false" />
+                                    <input type="checkbox" name="create_clips" value="true" checked class="w-4 h-4 rounded accent-fg-strong" />
+                                    <span>生成短视频切片</span>
+                                </label>
+                                <label class="flex items-center gap-2.5 text-[14px] cursor-pointer">
+                                    <input type="hidden" name="create_article" value="false" />
+                                    <input type="checkbox" name="create_article" value="true" checked class="w-4 h-4 rounded accent-fg-strong" />
+                                    <span>生成图文文章</span>
+                                </label>
+                                <label class="flex items-center gap-2.5 text-[14px] cursor-pointer">
+                                    <input type="checkbox" name="create_cover" checked class="w-4 h-4 rounded accent-fg-strong" />
+                                    <span>生成封面图</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <input type="hidden" name="subtitle_cn_font_size" :value="style.cn_font_size" />
+                    <input type="hidden" name="subtitle_en_font_size" :value="style.en_font_size" />
+                    <input type="hidden" name="subtitle_cn_margin_v" :value="style.cn_margin_v" />
+                    <input type="hidden" name="subtitle_en_margin_v" :value="style.en_margin_v" />
+                    <input type="hidden" name="subtitle_cn_alignment" :value="style.cn_alignment" />
+                    <input type="hidden" name="subtitle_en_alignment" :value="style.en_alignment" />
+                </div>
+
+                <div class="flex justify-end gap-3 mt-8">
+                    <a href="/" class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg inline-flex items-center hover:bg-muted hover:border-fg-faint transition">取消</a>
+                    <button type="submit" class="h-9 px-5 rounded-2xl bg-black text-white text-[13px] font-semibold shadow-btn hover:bg-fg-strong transition">创建任务</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Batch Mode -->
+        <div x-show="mode === 'batch'" x-transition x-cloak>
+            <form hx-post="/api/tasks/batch-create" hx-swap="none"
+                  hx-on::after-request="if(event.detail.successful) { showToast('批量任务创建成功，等待 Worker 处理', 'success'); setTimeout(function(){location.href='/tasks'},800); }">
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">URL 列表（每行一个）</label>
+                        <textarea name="urls" rows="6"
+                                  placeholder="https://www.youtube.com/watch?v=...&#10;https://www.youtube.com/watch?v=..."
+                                  class="w-full px-4 py-3 rounded-2xl border border-border text-[14px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition resize-none"></textarea>
+                    </div>
+
+                    <!-- 批量模式也支持选择任务范围 -->
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-2">任务范围</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="relative cursor-pointer">
+                                <input type="radio" name="task_scope" value="subtitle_only" class="sr-only peer" />
+                                <div class="rounded-2xl border-2 border-border px-3 py-2
+                                            peer-checked:border-black peer-checked:bg-muted-dark transition">
+                                    <div class="text-[13px] font-semibold text-fg-strong">仅翻译字幕</div>
+                                </div>
+                            </label>
+                            <label class="relative cursor-pointer">
+                                <input type="radio" name="task_scope" value="subtitle_dub" class="sr-only peer" />
+                                <div class="rounded-2xl border-2 border-border px-3 py-2
+                                            peer-checked:border-black peer-checked:bg-muted-dark transition">
+                                    <div class="text-[13px] font-semibold text-fg-strong">翻译+配音</div>
+                                </div>
+                            </label>
+                            <label class="relative cursor-pointer">
+                                <input type="radio" name="task_scope" value="dub_and_copy" class="sr-only peer" />
+                                <div class="rounded-2xl border-2 border-border px-3 py-2
+                                            peer-checked:border-black peer-checked:bg-muted-dark transition">
+                                    <div class="text-[13px] font-semibold text-fg-strong">翻译+配音+文案</div>
+                                </div>
+                            </label>
+                            <label class="relative cursor-pointer">
+                                <input type="radio" name="task_scope" value="full" class="sr-only peer" checked />
+                                <div class="rounded-2xl border-2 border-border px-3 py-2
+                                            peer-checked:border-black peer-checked:bg-muted-dark transition">
+                                    <div class="text-[13px] font-semibold text-fg-strong">全流程</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <a href="/" class="h-9 px-4 rounded-2xl border-2 border-border text-[13px] font-medium text-fg inline-flex items-center hover:bg-muted hover:border-fg-faint transition">取消</a>
+                    <button type="submit" class="h-9 px-5 rounded-2xl bg-black text-white text-[13px] font-semibold shadow-btn hover:bg-fg-strong transition">批量创建</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Process Info (动态) -->
+    <div class="mt-5 px-5 py-4 rounded-2xl bg-muted text-[13px] text-fg-sub">
+        <span class="font-medium text-fg">处理流程</span> &mdash;
+        <span x-show="scope === 'subtitle_only'">下载视频 &rarr; 翻译字幕 &rarr; 质量检查 &rarr; 字幕压制 &#10003;</span>
+        <span x-show="scope === 'subtitle_dub'" x-cloak>下载视频 &rarr; 翻译配音 &rarr; 质量检查 &#10003;</span>
+        <span x-show="scope === 'dub_and_copy'" x-cloak>下载视频 &rarr; 翻译配音 &rarr; 质量检查 &rarr; 二次创作 &#10003;</span>
+        <span x-show="scope === 'full'" x-cloak>下载视频 &rarr; 翻译配音 &rarr; 质量检查 &rarr; 二次创作 &rarr; 多平台发布 &#10003;</span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function vfTaskForm() {
+    return {
+        mode: 'single',
+        scope: 'full',
+        youtubeUrl: '',
+        sourceLang: 'en',
+        targetLang: 'zh_cn',
+        previewLoading: false,
+        previewUrl: '',
+        previewError: '',
+        previewDebug: null,
+        completedTasks: [],
+        selectedVideo: '',
+        platforms: [
+            { value: 'bilibili', label: 'B站' },
+            { value: 'douyin', label: '抖音' },
+            { value: 'xiaohongshu', label: '小红书' },
+            { value: 'youtube', label: 'YouTube' },
+            { value: 'weixin', label: '视频号' }
+        ],
+        selectedPlatforms: [],
+        accountsByPlatform: {},
+        publishTitle: "",
+        publishDescription: "",
+        publishTags: "",
+        publishTime: "",
+        coverPreview: null,
+        style: {
+            cn_font_size: 26,
+            en_font_size: 20,
+            cn_margin_v: 56,
+            en_margin_v: 26,
+            cn_alignment: 2,
+            en_alignment: 2
+        },
+        async init() {
+            try {
+                const resp = await fetch('/api/system/subtitle-style-defaults', { cache: 'no-store' });
+                if (!resp.ok) return;
+                const payload = await resp.json();
+                if (payload && payload.subtitle_style) {
+                    this.style = Object.assign({}, this.style, payload.subtitle_style);
+                }
+            } catch (_) {}
+            await this.loadCompletedTasks();
+        },
+        async loadCompletedTasks() {
+        },
+            try {
+                const resp = await fetch('/api/tasks/completed');
+                if (resp.ok) {
+                    this.completedTasks = await resp.json();
+                }
+            } catch (_) {}
+        },
+        async onPlatformChange(e) {
+            const platform = e.target.value;
+            if (e.target.checked) {
+                this.selectedPlatforms.push(platform);
+                await this.loadAccounts(platform);
+            } else {
+                this.selectedPlatforms = this.selectedPlatforms.filter(p => p !== platform);
+            }
+        },
+        async loadAccounts(platform) {
+            try {
+                const resp = await fetch(`/api/accounts?platform=${platform}`);
+                if (resp.ok) {
+                    this.accountsByPlatform[platform] = await resp.json();
+                }
+            } catch (_) {}
+        },
+        onCoverChange(e) {
+            const file = e.target.files[0];
+            if (file) this.coverPreview = URL.createObjectURL(file);
+        },
+        async previewSubtitle() {
+            this.previewError = '';
+            this.previewUrl = '';
+            this.previewDebug = null;
+
+            if (!this.youtubeUrl || !this.youtubeUrl.trim()) {
+                this.previewError = '请先填写视频链接后再预览';
+                showToast(this.previewError, 'error');
+                return;
+            }
+
+            this.previewLoading = true;
+            try {
+                const resp = await fetch('/api/tasks/subtitle-style/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_url: this.youtubeUrl.trim(),
+                        source_lang: this.sourceLang,
+                        target_lang: this.targetLang,
+                        task_scope: this.scope,
+                        subtitle_style: this.style
+                    })
+                });
+
+                const payload = await resp.json();
+                if (!resp.ok) {
+                    this.previewError = (payload && payload.detail) ? payload.detail : '预览生成失败';
+                    if (this.previewError.includes('可见性校验')) {
+                        this.previewError = '字幕已渲染但不可见，请调整字号/位置或切换视频片段后重试';
+                    }
+                    showToast(this.previewError, 'error');
+                    return;
+                }
+
+                this.previewUrl = payload.preview_url + '?t=' + Date.now();
+                this.previewDebug = payload.render_debug || null;
+                if (this.previewDebug) {
+                    this.previewDebug.preview_id = payload.preview_id;
+                }
+                showToast('预览已生成', 'success');
+            } catch (err) {
+                this.previewError = '预览请求失败，请检查服务状态';
+                showToast(this.previewError, 'error');
+            } finally {
+                this.previewLoading = false;
+            }
+        }
+    };
+}
+</script>
+{% endblock %}

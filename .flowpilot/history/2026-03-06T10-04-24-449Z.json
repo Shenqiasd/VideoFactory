@@ -1,0 +1,151 @@
+{
+  "name": "",
+  "totalTasks": 19,
+  "doneCount": 19,
+  "skipCount": 0,
+  "failCount": 0,
+  "retryTotal": 0,
+  "tasksByType": {
+    "backend": 10,
+    "frontend": 8,
+    "general": 1
+  },
+  "failsByType": {},
+  "taskResults": [
+    {
+      "id": "001",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "创建数据模型完成 [REMEMBER] 定义了 PublishTask 和 Account 两个 dataclass，使用 Python dataclasses"
+    },
+    {
+      "id": "002",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "扩展数据库完成：新增 publish_tasks 和 accounts 表及 CRUD 方法 [REMEMBER] 使用 SQLite 存储发布任务和账号信息，"
+    },
+    {
+      "id": "003",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现发布任务CRUD API [REMEMBER] 项目使用FastAPI+PublishScheduler管理发布队列 [DECISION] 复用现有dist"
+    },
+    {
+      "id": "004",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现账号 CRUD API [REMEMBER] 使用 JSON 文件存储账号数据 (data/accounts.json) [DECISION] 采用原子写入"
+    },
+    {
+      "id": "005",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "创建 SocialAutoUploadAdapter 适配器文件 [REMEMBER] 项目使用 social-auto-upload 进行多平台发布，支持抖音"
+    },
+    {
+      "id": "006",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现 PublishManager.execute_task() 和 retry_task() 方法 [REMEMBER] PublishManager 新增两"
+    },
+    {
+      "id": "007",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现执行API：添加execute和retry端点 [REMEMBER] 使用BackgroundTasks异步执行发布任务，复用_run_due_jobs辅助"
+    },
+    {
+      "id": "008",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现统计API endpoint [REMEMBER] 新增GET /api/distribute/stats返回发布队列统计(总数/按状态/按平台) [DEC"
+    },
+    {
+      "id": "009",
+      "type": "frontend",
+      "status": "done",
+      "retries": 0,
+      "summary": "发布队列界面已完成 [REMEMBER] 使用HTMX实现动态数据加载，stats每5秒刷新，queue每3秒刷新 [DECISION] 采用Alpine.js"
+    },
+    {
+      "id": "010",
+      "type": "frontend",
+      "status": "done",
+      "retries": 0,
+      "summary": "任务状态展示完成 [REMEMBER] 状态标签使用图标+颜色区分4种状态(pending/publishing/done/failed) [DECISION]"
+    },
+    {
+      "id": "011",
+      "type": "frontend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现Alpine.js交互逻辑：publishApp()数据管理、loadTasks()、executeTask()、retryTask() [DECISION"
+    },
+    {
+      "id": "012",
+      "type": "frontend",
+      "status": "done",
+      "retries": 0,
+      "summary": "新建任务表单添加视频/平台/账号选择下拉框 [REMEMBER] 使用Alpine.js实现动态数据加载，平台选择后自动获取对应账号 [DECISION] 仅在"
+    },
+    {
+      "id": "013",
+      "type": "frontend",
+      "status": "done",
+      "retries": 0,
+      "summary": "已添加发布信息表单字段（标题、描述、标签、封面、发布时间）到new_task.html [REMEMBER] 表单字段仅在scope=full时显示，使用Alp"
+    },
+    {
+      "id": "014",
+      "type": "frontend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现表单提交逻辑：验证必填字段（视频、平台、标题），调用POST /api/distribute/publish API，成功后跳转到发布页面 [REMEMBE"
+    },
+    {
+      "id": "015",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现视频选择API端点 GET /api/tasks/completed [REMEMBER] 使用 TaskStore.list_by_state(TaskS"
+    },
+    {
+      "id": "016",
+      "type": "frontend",
+      "status": "done",
+      "retries": 0,
+      "summary": "创建账号管理界面 [REMEMBER] 使用Alpine.js实现响应式交互，复用项目现有Tailwind设计系统 [DECISION] 采用表格布局展示账号列"
+    },
+    {
+      "id": "017",
+      "type": "backend",
+      "status": "done",
+      "retries": 0,
+      "summary": "实现账号测试API端点 [REMEMBER] 账号信息存储在SQLite的accounts表中，包含cookie_path字段 [DECISION] 测试逻辑仅"
+    },
+    {
+      "id": "018",
+      "type": "frontend",
+      "status": "done",
+      "retries": 0,
+      "summary": "增强发布管理配置界面 [REMEMBER] settings.html 包含完整的发布配置区（平台选择、调度参数、内容模板） [DECISION] 采用与翻译配"
+    },
+    {
+      "id": "019",
+      "type": "general",
+      "status": "done",
+      "retries": 0,
+      "summary": "端到端测试已完成 [REMEMBER] 创建了 test_publish_e2e.py 测试发布流程（账号创建→任务创建→发布执行→状态验证→重试测试），创建了"
+    }
+  ],
+  "startTime": "2026-03-06T09:02:24.086Z",
+  "endTime": "2026-03-06T10:04:24.448Z"
+}

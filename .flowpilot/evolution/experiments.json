@@ -1,0 +1,18 @@
+[
+  {
+    "timestamp": "2026-03-06T10:04:25.068Z",
+    "experiments": [
+      {
+        "trigger": "全部一次通过",
+        "observation": "19 个任务零重试",
+        "action": "将 parallelLimit 提升至 5",
+        "expected": "提高并行度",
+        "target": "config",
+        "applied": true,
+        "snapshotBefore": "{}"
+      }
+    ],
+    "status": "completed",
+    "snapshotFile": "/Users/enesource/Projects/video-factory/.flowpilot/evolution/snapshot-2026-03-06T10-04-25-068Z.json"
+  }
+]

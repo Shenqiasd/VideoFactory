@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any, List
 import httpx
 
 from core.config import Config
+from core.task import TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -353,3 +354,44 @@ class PublishManager:
                 await asyncio.sleep(5)
 
         return results
+
+    async def execute_task(
+        self,
+        task_id: str,
+        platforms: List[str] = None,
+    ) -> Dict[str, Any]:
+        """执行任务发布"""
+        task_store = TaskStore()
+        task = task_store.get(task_id)
+        if not task:
+            return {"success": False, "error": f"任务不存在: {task_id}"}
+
+        if platforms:
+            filtered_products = []
+            for product in task.products:
+                ptype = product.get("type", "")
+                for platform in platforms:
+                    if ptype == "long_video" and platform in ["bilibili", "youtube"]:
+                        filtered_products.append({**product, "platform": platform})
+                    elif ptype == "short_clip" and platform in ["douyin", "xiaohongshu"]:
+                        filtered_products.append({**product, "platform": platform})
+            products = filtered_products
+        else:
+            products = task.products
+
+        results = await self.publish_to_all(products, task_id=task_id)
+        return {"success": True, "results": results}
+
+    async def retry_task(
+        self,
+        task_id: str,
+        platform: str = None,
+    ) -> Dict[str, Any]:
+        """重试失败的发布"""
+        task_store = TaskStore()
+        task = task_store.get(task_id)
+        if not task:
+            return {"success": False, "error": f"任务不存在: {task_id}"}
+
+        platforms = [platform] if platform else None
+        return await self.execute_task(task_id, platforms)
