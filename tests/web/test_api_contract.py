@@ -1,5 +1,9 @@
+import json
+
 from api.routes import tasks as tasks_routes
-from core.task import TaskState
+from api.routes import distribute as distribute_routes
+from core.task import Task, TaskState
+from distribute.scheduler import PublishJob
 from pathlib import Path
 
 
@@ -728,3 +732,400 @@ def test_task_artifacts_alias_route_works(client, tmp_path):
     artifact = payload["artifacts"][0]
     download_resp = client.get(f"/tasks/{task_id}/artifacts/{artifact['artifact_id']}/download")
     assert download_resp.status_code == 200
+
+
+def test_publish_account_validation_and_default_binding(client, tmp_path):
+    cookie_a = tmp_path / "douyin_a.json"
+    cookie_a.write_text(
+        json.dumps({"cookies": [{"domain": ".douyin.com", "name": "sessionid", "value": "a"}]}),
+        encoding="utf-8",
+    )
+    cookie_b = tmp_path / "douyin_b.json"
+    cookie_b.write_text(
+        json.dumps({"cookies": [{"domain": ".douyin.com", "name": "sessionid_ss", "value": "b"}]}),
+        encoding="utf-8",
+    )
+
+    first = client.post(
+        "/api/publish/accounts",
+        json={"platform": "douyin", "name": "A", "cookie_path": str(cookie_a)},
+    )
+    second = client.post(
+        "/api/publish/accounts",
+        json={"platform": "douyin", "name": "B", "cookie_path": str(cookie_b), "is_default": True},
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    second_id = second.json()["account_id"]
+    test_resp = client.post(f"/api/publish/accounts/{second_id}/test")
+    assert test_resp.status_code == 200
+    payload = test_resp.json()
+    assert payload["success"] is True
+    assert payload["capabilities"]["cookie_exists"] is True
+
+    accounts_resp = client.get("/api/publish/accounts?platform=douyin")
+    accounts = accounts_resp.json()["accounts"]
+    defaults = [a for a in accounts if a["is_default"]]
+    assert len(defaults) == 1
+    assert defaults[0]["id"] == second_id
+
+
+def test_account_config_and_upload_endpoint(client, tmp_path):
+    config_resp = client.get("/api/publish/accounts/config")
+    assert config_resp.status_code == 200
+    assert "storage_dir" in config_resp.json()
+
+    cookie_file = tmp_path / "bilibili_cookie.json"
+    cookie_file.write_text("{}", encoding="utf-8")
+    with cookie_file.open("rb") as fh:
+        response = client.post(
+            "/api/publish/accounts/upload",
+            data={"platform": "bilibili", "name": "上传账号"},
+            files={"cookie_file": ("bilibili_cookie.json", fh, "application/json")},
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["account_id"]
+    assert payload["cookie_path"].endswith(".json")
+
+    accounts = client.get("/api/publish/accounts?platform=bilibili").json()["accounts"]
+    uploaded = next(account for account in accounts if account["name"] == "上传账号")
+    assert uploaded["cookie_filename"].endswith(".json")
+
+
+def test_account_format_validation_rejects_invalid_cookie_file(client, tmp_path):
+    bad_cookie = tmp_path / "bad_cookie.txt"
+    bad_cookie.write_text("not a valid cookie file", encoding="utf-8")
+
+    response = client.post(
+        "/api/publish/accounts",
+        json={"platform": "douyin", "name": "坏Cookie", "cookie_path": str(bad_cookie)},
+    )
+    assert response.status_code == 200
+    account_id = response.json()["account_id"]
+
+    accounts = client.get("/api/publish/accounts?platform=douyin").json()["accounts"]
+    target = next(account for account in accounts if account["id"] == account_id)
+    assert target["status"] == "invalid"
+    assert target["capabilities"]["format_valid"] is False
+    assert "格式" in target["last_error"]
+
+
+def test_account_upload_can_set_default_and_replace_cookie(client, tmp_path):
+    first_cookie = tmp_path / "first.json"
+    second_cookie = tmp_path / "second.txt"
+    first_cookie.write_text("{}", encoding="utf-8")
+    second_cookie.write_text("# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tFALSE\t0\ttoken\tabc\n", encoding="utf-8")
+
+    with first_cookie.open("rb") as fh:
+        response = client.post(
+            "/api/publish/accounts/upload",
+            data={"platform": "youtube", "name": "上传默认号", "is_default": "true"},
+            files={"cookie_file": ("first.json", fh, "application/json")},
+        )
+    assert response.status_code == 200
+    account_id = response.json()["account_id"]
+
+    accounts = client.get("/api/publish/accounts?platform=youtube").json()["accounts"]
+    target = next(account for account in accounts if account["id"] == account_id)
+    assert target["is_default"] is True
+
+    with second_cookie.open("rb") as fh:
+        replace_resp = client.post(
+            f"/api/publish/accounts/{account_id}/cookie",
+            files={"cookie_file": ("second.txt", fh, "text/plain")},
+        )
+    assert replace_resp.status_code == 200
+    account = replace_resp.json()["account"]
+    assert account["cookie_filename"].endswith(".txt")
+    assert account["capabilities"]["format_kind"] == "netscape"
+
+
+def test_platform_specific_cookie_validation_accepts_matching_cookie(client, tmp_path):
+    bilibili_cookie = tmp_path / "bilibili.json"
+    bilibili_cookie.write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {"domain": ".bilibili.com", "name": "SESSDATA", "value": "abc"},
+                    {"domain": ".bilibili.com", "name": "bili_jct", "value": "def"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/publish/accounts",
+        json={"platform": "bilibili", "name": "B站匹配账号", "cookie_path": str(bilibili_cookie)},
+    )
+    assert response.status_code == 200
+    account_id = response.json()["account_id"]
+    accounts = client.get("/api/publish/accounts?platform=bilibili").json()["accounts"]
+    target = next(account for account in accounts if account["id"] == account_id)
+    assert target["status"] == "active"
+    assert target["capabilities"]["platform_cookie_match"] is True
+
+
+def test_platform_specific_cookie_validation_rejects_mismatched_cookie(client, tmp_path):
+    youtube_cookie = tmp_path / "youtube.txt"
+    youtube_cookie.write_text(
+        "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tabc\n",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/publish/accounts",
+        json={"platform": "douyin", "name": "抖音错配账号", "cookie_path": str(youtube_cookie)},
+    )
+    assert response.status_code == 200
+    account_id = response.json()["account_id"]
+    accounts = client.get("/api/publish/accounts?platform=douyin").json()["accounts"]
+    target = next(account for account in accounts if account["id"] == account_id)
+    assert target["status"] == "invalid"
+    assert target["capabilities"]["platform_cookie_match"] is False
+    assert "平台不匹配" in target["last_error"]
+
+
+def test_publish_replay_accepts_partial_success_task(client, monkeypatch):
+    async def _noop_run_due_jobs(scheduler):
+        return None
+
+    monkeypatch.setattr("api.routes.distribute._run_due_jobs", _noop_run_due_jobs)
+
+    task = Task(
+        task_id="vf_partial_contract",
+        source_url="https://example.com",
+        source_title="demo",
+    )
+    task.state = TaskState.PARTIAL_SUCCESS.value
+    task.products = [{"type": "long_video", "platform": "all", "local_path": "/tmp/video.mp4", "title": "title"}]
+    distribute_routes.get_task_store().update(task)
+
+    scheduler = distribute_routes.get_scheduler()
+    scheduler._queue = []
+    failed_job = PublishJob(
+        task_id=task.task_id,
+        platform="bilibili",
+        scheduled_time=0,
+        product=task.products[0],
+    )
+    failed_job.status = "failed"
+    failed_job.result = {"error": "mock failure"}
+    scheduler._queue.append(failed_job)
+    scheduler._save_queue()
+
+    response = client.post("/api/distribute/replay", json={"task_id": task.task_id, "job_id": failed_job.job_id})
+    assert response.status_code == 200
+    assert response.json()["job_id"] == failed_job.job_id
+    refreshed = distribute_routes.get_task_store().get(task.task_id)
+    assert refreshed.state == TaskState.PUBLISHING.value
+
+
+def test_manual_complete_and_fail_contract(client):
+    task = Task(task_id="vf_manual_contract", source_url="https://example.com", source_title="demo")
+    task.state = TaskState.PUBLISHING.value
+    task.products = [{"type": "long_video", "platform": "all", "local_path": "/tmp/video.mp4", "title": "title"}]
+    distribute_routes.get_task_store().update(task)
+    scheduler = distribute_routes.get_scheduler()
+    scheduler._queue = []
+
+    job = PublishJob(task_id=task.task_id, platform="bilibili", scheduled_time=0, product=task.products[0])
+    job.status = "manual_pending"
+    job.result = {"manual_checklist": {"video_path": "/tmp/video.mp4"}}
+    scheduler._queue.append(job)
+    scheduler._save_queue()
+
+    ok = client.post(
+        "/api/distribute/manual/complete",
+        json={"task_id": task.task_id, "job_id": job.job_id, "publish_url": "https://example.com/video"},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["job"]["status"] == "done"
+
+    task2 = Task(task_id="vf_manual_fail", source_url="https://example.com", source_title="demo")
+    task2.state = TaskState.PUBLISHING.value
+    task2.products = task.products
+    distribute_routes.get_task_store().update(task2)
+    job2 = PublishJob(task_id=task2.task_id, platform="youtube", scheduled_time=0, product=task2.products[0])
+    job2.status = "manual_pending"
+    job2.result = {"manual_checklist": {"video_path": "/tmp/video.mp4"}}
+    scheduler._queue = [job2]
+    scheduler._save_queue()
+
+    failed = client.post(
+        "/api/distribute/manual/fail",
+        json={"task_id": task2.task_id, "job_id": job2.job_id, "error": "cookie invalid"},
+    )
+    assert failed.status_code == 200
+    assert failed.json()["job"]["status"] == "failed"
+
+
+def test_publish_queue_partial_renders_retry_cancel_and_manual_controls(client):
+    scheduler = distribute_routes.get_scheduler()
+    task_id = "vf_publish_partial"
+    product = {"type": "long_video", "local_path": "/tmp/video.mp4", "title": "title"}
+
+    pending = PublishJob(task_id=task_id, platform="bilibili", scheduled_time=0, product=product)
+    failed = PublishJob(task_id=task_id, platform="youtube", scheduled_time=0, product=product)
+    manual = PublishJob(task_id=task_id, platform="douyin", scheduled_time=0, product=product)
+    failed.status = "failed"
+    failed.result = {"error": "mock failure"}
+    manual.status = "manual_pending"
+    manual.result = {"manual_checklist": {"video_path": "/tmp/video.mp4"}}
+    scheduler._queue = [pending, failed, manual]
+    scheduler._save_queue()
+
+    response = client.get("/web/partials/publish_queue?platform=all")
+    assert response.status_code == 200
+    html = response.text
+    assert "重试" in html
+    assert "标记已发布" in html
+    assert "取消" in html
+
+
+def test_publish_request_persists_selected_account_binding(client, tmp_path, monkeypatch):
+    async def _noop_run_due_jobs(scheduler):
+        return None
+
+    monkeypatch.setattr("api.routes.distribute._run_due_jobs", _noop_run_due_jobs)
+
+    cookie_path = tmp_path / "bilibili_cookie.json"
+    cookie_path.write_text("{}", encoding="utf-8")
+    account_resp = client.post(
+        "/api/publish/accounts",
+        json={"platform": "bilibili", "name": "B站指定账号", "cookie_path": str(cookie_path)},
+    )
+    account_id = account_resp.json()["account_id"]
+
+    task = Task(task_id="vf_bind_contract", source_url="https://example.com", source_title="demo")
+    task.state = TaskState.READY_TO_PUBLISH.value
+    task.products = [{"type": "long_video", "platform": "all", "local_path": "/tmp/video.mp4", "title": "title"}]
+    distribute_routes.get_task_store().update(task)
+
+    response = client.post(
+        "/api/distribute/publish",
+        json={
+            "task_id": task.task_id,
+            "platforms": ["bilibili"],
+            "publish_accounts": {"bilibili": account_id},
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["publish_accounts"] == {"bilibili": account_id}
+
+    refreshed = distribute_routes.get_task_store().get(task.task_id)
+    assert refreshed.publish_accounts == {"bilibili": account_id}
+
+    scheduler = distribute_routes.get_scheduler()
+    jobs = [job for job in scheduler._queue if job.task_id == task.task_id]
+    assert len(jobs) == 1
+    assert jobs[0].metadata["account_id"] == account_id
+
+
+def test_publish_request_rejects_cross_platform_account_binding(client, tmp_path):
+    cookie_path = tmp_path / "douyin_cookie.json"
+    cookie_path.write_text("{}", encoding="utf-8")
+    account_resp = client.post(
+        "/api/publish/accounts",
+        json={"platform": "douyin", "name": "抖音账号", "cookie_path": str(cookie_path)},
+    )
+    account_id = account_resp.json()["account_id"]
+
+    task = Task(task_id="vf_bind_reject", source_url="https://example.com", source_title="demo")
+    task.state = TaskState.READY_TO_PUBLISH.value
+    task.products = [{"type": "long_video", "platform": "all", "local_path": "/tmp/video.mp4", "title": "title"}]
+    distribute_routes.get_task_store().update(task)
+
+    response = client.post(
+        "/api/distribute/publish",
+        json={
+            "task_id": task.task_id,
+            "platforms": ["bilibili"],
+            "publish_accounts": {"bilibili": account_id},
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "ACCOUNT_PLATFORM_MISMATCH"
+
+
+def test_publish_events_api_and_task_detail_include_binding_metadata(client, tmp_path, monkeypatch):
+    async def _noop_run_due_jobs(scheduler):
+        return None
+
+    monkeypatch.setattr("api.routes.distribute._run_due_jobs", _noop_run_due_jobs)
+
+    cookie_path = tmp_path / "youtube_cookie.json"
+    cookie_path.write_text("{}", encoding="utf-8")
+    account_resp = client.post(
+        "/api/publish/accounts",
+        json={"platform": "youtube", "name": "YouTube 主号", "cookie_path": str(cookie_path)},
+    )
+    account_id = account_resp.json()["account_id"]
+
+    task = Task(task_id="vf_detail_binding", source_url="https://example.com", source_title="demo")
+    task.state = TaskState.READY_TO_PUBLISH.value
+    task.products = [{"type": "long_video", "platform": "all", "local_path": "/tmp/video.mp4", "title": "title"}]
+    distribute_routes.get_task_store().update(task)
+
+    publish_resp = client.post(
+        "/api/distribute/publish",
+        json={
+            "task_id": task.task_id,
+            "platforms": ["youtube"],
+            "publish_accounts": {"youtube": account_id},
+        },
+    )
+    assert publish_resp.status_code == 200
+
+    detail_resp = client.get(f"/api/tasks/{task.task_id}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    assert detail["publish_accounts"] == {"youtube": account_id}
+    assert detail["publish_account_details"]["youtube"]["name"] == "YouTube 主号"
+
+    events_resp = client.get(f"/api/distribute/events/{task.task_id}")
+    assert events_resp.status_code == 200
+    events = events_resp.json()["events"]
+    assert any(event["event_type"] == "enqueued" for event in events)
+
+
+def test_publish_partials_render_account_and_event_context(client, tmp_path, monkeypatch):
+    async def _noop_run_due_jobs(scheduler):
+        return None
+
+    monkeypatch.setattr("api.routes.distribute._run_due_jobs", _noop_run_due_jobs)
+
+    cookie_path = tmp_path / "bilibili_cookie.json"
+    cookie_path.write_text("{}", encoding="utf-8")
+    account_resp = client.post(
+        "/api/publish/accounts",
+        json={"platform": "bilibili", "name": "B站运营号", "cookie_path": str(cookie_path)},
+    )
+    account_id = account_resp.json()["account_id"]
+
+    task = Task(task_id="vf_publish_partials", source_url="https://example.com", source_title="demo")
+    task.state = TaskState.READY_TO_PUBLISH.value
+    task.products = [{"type": "long_video", "platform": "all", "local_path": "/tmp/video.mp4", "title": "发布测试"}]
+    distribute_routes.get_task_store().update(task)
+
+    publish_resp = client.post(
+        "/api/distribute/publish",
+        json={
+            "task_id": task.task_id,
+            "platforms": ["bilibili"],
+            "publish_accounts": {"bilibili": account_id},
+        },
+    )
+    assert publish_resp.status_code == 200
+
+    queue_resp = client.get("/web/partials/publish_queue?platform=all")
+    assert queue_resp.status_code == 200
+    queue_html = queue_resp.text
+    assert "B站运营号" in queue_html
+    assert "最近事件" in queue_html
+
+    events_resp = client.get(f"/web/partials/publish_events?task_id={task.task_id}")
+    assert events_resp.status_code == 200
+    assert "enqueued" in events_resp.text

@@ -8,6 +8,7 @@ Groq Whisper API 代理
 服务启动在: http://127.0.0.1:8866
 """
 import logging
+import os
 import httpx
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import Response, JSONResponse

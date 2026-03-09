@@ -1,5 +1,67 @@
 # 执行日志
 
+## 2026-03-09
+- 21:20 [Codex] 完成全仓回归并收口账号/发布前端问题
+  - `api/routes/publish.py` 调整 Cookie 平台识别策略：只有明确识别为错配时才拒绝，空白/脱敏 Cookie 允许进入人工发布流
+  - 修复后账号页“检测”可恢复 `active` 状态展示，发布页“标记失败 / 标记已发布 / 重试 / 取消”交互恢复
+  - 全量验证结果：`python3.11 -m pytest -q` -> `125 passed, 18 warnings`
+- 20:30 [Codex] 完成翻译主链路去 KlicStudio 中心化
+  - `src/production/pipeline.py` 改为仅走自管链路：`ASRRouter -> 字幕翻译/补翻 -> Volcengine TTS -> 视频重建 -> QC`
+  - 新增 KlicStudio 对齐产物：`origin_language.txt`、`target_language.txt`，并在主链路内写出 `origin_language_srt.srt` / `target_language_srt.srt` / `bilingual_srt.srt`
+  - 主链路现在直接生成 `translated_title`、`translated_description`、`transcript_text`，不再依赖 KlicStudio `video_info`
+- 20:45 [Codex] 收口失败语义与默认配置
+  - 移除 `yt-dlp` JS challenge 失败后“把 URL 交给 KlicStudio”的隐式降级，任务会明确失败并保留错误码
+  - `config/settings.yaml` / `config/settings.example.yaml` 默认切到自管模式：`translation.provider=volcengine_ark`、`tts.provider=volcengine`、`tts.volcengine.enabled=true`
+  - `api/routes/system.py` 与 `src/asr/__init__.py` 默认值同步调整，旧 `klicstudio` provider 仅保留兼容字段，不再作为主流程推荐项
+- 21:00 [Codex] 补充并通过回归测试
+  - 更新测试语义：下载 JS runtime 失败明确失败；ASR 失败不再回落 KlicStudio；TTS 任务保持在自管链路内完成
+  - 验证结果：
+    - `python3.11 -m pytest -q tests/test_production_asr_router.py tests/test_production_submit_failures.py tests/test_production_download_retry.py tests/web/test_download_fallback.py tests/web/test_api_contract.py -k 'asr_tts_settings or download_fallback or production_asr_router or production_submit_failures or step_download'` -> `13 passed`
+    - `python3.11 -m pytest -q tests/web/test_api_contract.py tests/test_production_asr_router.py tests/test_production_submit_failures.py tests/web/test_download_fallback.py` -> `46 passed`
+- 09:30 [Codex] 梳理当前发布链路并确认有效实现入口
+  - 确认活跃发布路径为 `api/routes/distribute.py` + `api/routes/publish.py` + `src/distribute/{scheduler,publisher}.py`
+  - 清理结论：`job_id` 作为发布作业主操作键，`idempotency_key` 保留作幂等去重
+  - 确认发布队列已从旧 JSON 持久化迁移到 SQLite `publish_jobs`
+- 10:00 [Codex] 完成发布状态模型修正
+  - 在 `src/core/task.py` 新增显式状态 `partial_success`
+  - 调整状态机：`publishing -> completed | partial_success | failed`
+  - 重放失败发布时支持 `partial_success -> publishing`
+- 10:20 [Codex] 完成手动发布确认链路收口
+  - 发布作业支持 `manual_pending`
+  - 新增按 `job_id` 进行手动成功确认、手动失败确认、取消、重试
+  - 页面队列支持人工确认按钮与部分失败恢复
+- 10:40 [Codex] 完成账号体系接入实际发布执行器
+  - `accounts` 表补充 `is_default`、`capabilities_json`、`last_error`
+  - 账号创建/检测时立即校验 Cookie 与平台支持能力
+  - 发布执行优先使用任务显式绑定账号，否则回退平台默认账号
+  - 拒绝跨平台账号绑定与无效 Cookie 账号执行
+- 11:10 [Codex] 完成任务级账号绑定与前端发布页接通
+  - `Task` 新增 `publish_accounts`
+  - `/api/distribute/publish` 支持 `publish_accounts` 请求体并持久化到任务
+  - 调度器把 `account_id` 写入 job metadata，执行器按作业元数据选账号
+  - `web/templates/new_task.html` 接通账号列表、默认账号自动选择、提交时携带绑定
+- 11:40 [Codex] 完成发布前预校验与页面提示
+  - 新建任务页在选择平台后即时加载账号状态
+  - 对“未配置账号 / 账号都不可用 / Cookie 缺失”进行前置提示
+  - 提交发布前阻止无有效账号的平台进入队列
+- 12:10 [Codex] 完成发布审计事件与页面可观测性
+  - SQLite 新增 `publish_job_events`
+  - 调度器记录 `enqueued / scheduled / started / manual_pending / retry_scheduled / failed / cancelled / replayed / manual_completed / manual_failed / succeeded`
+  - 新增 `/api/distribute/events/{task_id}` 查询发布事件
+  - 发布管理页新增“最近发布事件”，队列行展示绑定账号、账号状态、最近事件
+  - 任务详情页新增发布账号绑定与发布事件区域
+- 12:40 [Codex] 修复两个真实前端问题
+  - 修复 `web/templates/new_task.html` 中损坏的 Alpine 结构与重复平台区块
+  - 修复 `web/templates/publish.html` / `web/templates/partials/publish_queue.html` 中按钮作用域与错误禁用问题，保证取消/重试/人工确认可直接操作
+- 13:00 [Codex] 补齐测试覆盖并完成验证
+  - 调度器测试覆盖：默认账号校验、显式账号优先、跨平台账号拒绝、部分成功状态
+  - Web API 合同测试覆盖：账号检测/默认绑定、部分成功重放、手动成功/失败、账号绑定持久化、事件接口、页面 partial 渲染
+  - Playwright 交互测试覆盖：账号页创建+检测、发布页取消、手动失败、重试、人工确认、部分失败恢复
+  - 验证结果：
+    - `python3.11 -m pytest -q tests/test_publish_scheduler.py` -> `9 passed`
+    - `python3.11 -m pytest -q tests/web/test_api_contract.py` -> `34 passed`
+    - `python3.11 -m pytest -q tests/e2e/test_frontend_playwright.py -k 'accounts_page_can_create_and_validate_account or publish_page_supports_cancel_retry_manual_and_partial_recovery'` -> `2 passed`
+
 ## 2026-03-03
 - 建立 workflow 目录与 5 步模板。
 - 基于代码完成后端现状基线梳理（非对话记忆）：
@@ -291,3 +353,152 @@
   - 创建 main 和 develop 分支
 - 创建 Git 工作流文档
   - workflow/GIT_WORKFLOW_CLAUDE_CODEX.md（详细操作流程）
+
+## 2026-03-09 10:45 - 一键启动故障热修复（Whisper Proxy）
+
+**问题**:
+- 执行 `bash scripts/start_all.sh start` 时，`Groq Whisper Proxy` 启动失败（8866 端口未监听）
+
+**定位结果**:
+- `logs/whisper_proxy.log` 报错：`NameError: name 'os' is not defined`
+- 根因：`scripts/groq_whisper_proxy.py` 缺少 `import os`
+
+**处理**:
+- 修复文件：`scripts/groq_whisper_proxy.py`（新增 `import os`）
+- 重启全套服务：`bash scripts/start_all.sh start`
+
+**验证**:
+- `bash scripts/start_all.sh status`：5/5 服务全部 `✅`
+- `curl http://127.0.0.1:8087/api/health`：healthy
+- `curl http://127.0.0.1:8866/health`：healthy
+- `curl http://127.0.0.1:8877/health`：healthy
+- `curl http://127.0.0.1:8888/api/capability/subtitleTask?taskId=test`：接口可达（返回任务不存在，符合预期）
+
+## 2026-03-09 13:58 - 发布链路收口与手动发布闭环
+
+**目标**:
+- 收口旧发布 API，只保留当前 `api/distribute + api/publish` 活动链路
+- 修复取消、重试、部分失败状态不准确的问题
+- 为手动发布补持久化 checklist 和人工确认闭环
+
+**处理**:
+- `src/distribute/scheduler.py`
+  - 新增 `manual_pending` / `cancelled` 状态处理
+  - 取消、重试改为支持按 `idempotency_key` 精确命中单个发布作业
+  - 手动发布结果持久化到发布队列，并提供人工确认完成/失败入口
+  - 任务最终状态改为按结果判定，部分失败不再误记为 `completed`
+- `api/routes/distribute.py`
+  - 增加精确重试、取消、手动确认完成、手动确认失败接口
+- `api/routes/pages.py` + `web/templates/publish.html` + `web/templates/partials/publish_queue.html`
+  - 发布页展示手动发布 checklist
+  - 前端重试/取消/人工确认增加错误提示和刷新逻辑
+  - 修复计划时间字段显示错误
+- `api/routes/publish.py`
+  - 补充账号测试接口 `/api/publish/accounts/{account_id}/test`
+- `web/app.py`
+  - 将旧的发布任务 CRUD 接口改为显式废弃响应，避免继续走失效实现
+
+**验证**:
+- `python3.11 -m pytest -q tests/test_publish_scheduler.py` → `5 passed`
+- `python3.11 -m pytest -q tests/e2e/test_publish_e2e.py` → `1 skipped`
+
+## 2026-03-09 14:16 - 发布队列迁移到 SQLite + 引入稳定 job_id
+
+**目标**:
+- 发布作业操作键从 `idempotency_key` 切到稳定 `job_id`
+- 发布队列从 `publish_queue.json` 切换到 SQLite 持久化
+
+**处理**:
+- `src/core/database.py`
+  - 新增 `publish_jobs` 表
+  - 新增全量替换与读取发布作业的方法
+- `src/distribute/scheduler.py`
+  - `PublishJob` 新增 `job_id / created_at / updated_at`
+  - 调度器改为读写 SQLite 队列表
+  - 保留旧 `publish_queue.json` 作为一次性迁移来源
+  - 取消、重试、手动确认支持按 `job_id` 精确命中
+- `api/routes/distribute.py`
+  - 接口请求参数从 `idempotency_key` 切换为 `job_id`
+- `web/templates/publish.html` + `web/templates/partials/publish_queue.html`
+  - 页面操作全部改用 `job_id`
+- `tests/test_publish_scheduler.py`
+  - 测试隔离到临时 SQLite 数据库
+  - 新增旧 JSON 队列迁移到 SQLite 的用例
+
+**验证**:
+- `python3.11 -m pytest -q tests/test_publish_scheduler.py` → `6 passed`
+
+## 2026-03-09 14:42 - 账号绑定接入发布器 + 部分成功状态 + 发布测试补齐
+
+**目标**:
+- 让账号体系真正参与发布执行：默认账号选择、Cookie 校验、平台能力检测
+- 增加显式 `partial_success` 状态，区分“部分平台成功”与“完全失败”
+- 补发布 API 合同测试和页面交互层测试
+
+**处理**:
+- `src/core/database.py`
+  - 扩展 `accounts` 表：`is_default / capabilities_json / last_error`
+  - 新增默认账号选择与验证状态更新方法
+  - 支持 `VF_DB_PATH` 环境变量，测试环境使用临时 SQLite
+- `api/routes/publish.py`
+  - 创建账号时立即校验 Cookie 与平台能力
+  - 新增默认账号设置接口
+  - 测试账号接口回写验证状态和能力信息
+- `src/distribute/publisher.py`
+  - 发布前强制解析平台默认账号
+  - 若账号无效或 Cookie 缺失，直接返回发布错误
+  - 自动/手动发布 payload 都带上账号信息
+- `src/core/task.py`
+  - 新增 `TaskState.PARTIAL_SUCCESS`
+- `src/distribute/scheduler.py`
+  - 发布汇总结果改为 `completed / partial_success / failed` 三态
+- `api/routes/distribute.py`
+  - `partial_success` 任务在重试失败作业时会恢复到 `publishing`
+- `api/routes/pages.py`
+  - 页面状态展示支持“部分成功”
+- `web/templates/accounts.html`
+  - 账号页新增 Cookie 路径、检测、设为默认
+- `tests/web/test_api_contract.py`
+  - 新增账号验证/默认绑定、重试 partial_success、手动确认、发布页控件渲染测试
+- `tests/e2e/test_frontend_playwright.py`
+  - 新增账号页创建与检测交互测试（当前环境下被跳过）
+
+**验证**:
+- `python3.11 -m pytest -q tests/test_publish_scheduler.py` → `7 passed`
+- `python3.11 -m pytest -q tests/web/test_api_contract.py -k 'publish or partial or manual or account'` → `4 passed`
+- `python3.11 -m pytest -q tests/e2e/test_frontend_playwright.py -k accounts_page_can_create_and_validate_account` → `skipped`
+
+## 2026-03-09 17:05 - 存储管理 Day1~Day4 一次性完成
+
+**处理**:
+- `src/core/storage.py`
+  - 新增 R2/本地文件详情列表、批量删除、过期清理、时间/大小格式化
+  - 增强本地路径安全校验
+- `api/routes/storage.py`
+  - 新增存储列表、删除、清理、清理配置接口
+  - 读取/写入 `settings.yaml` 的清理配置
+- `api/server.py`
+  - 集成 `StorageCleanupScheduler`
+- `src/core/scheduler.py`
+  - 新增存储清理定时任务（APScheduler 可选）
+- `web/templates/storage.html`
+  - 存储管理 UI + Alpine 交互（列表/删除/清理）
+- `web/templates/settings.html`
+  - 存储清理规则配置界面 + 保存逻辑
+- `config/settings.yaml`
+  - 新增 `storage.auto_cleanup` 默认配置
+- `web/app.py`
+  - 兼容存储管理 API 入口
+- `tests/web/test_storage_management.py`
+  - 覆盖列表/删除/清理/配置接口
+
+**DAY_DONE**:
+- DAY_DONE: Day1 | files: src/core/storage.py, api/routes/storage.py, web/templates/storage.html | test_result: `python3.11 -m pytest -q` (2 failed: e2e/playwright)
+- DAY_DONE: Day2 | files: src/core/storage.py, api/routes/storage.py, web/templates/storage.html | test_result: `python3.11 -m pytest -q` (2 failed: e2e/playwright)
+- DAY_DONE: Day3 | files: src/core/storage.py, api/routes/storage.py, web/templates/storage.html | test_result: `python3.11 -m pytest -q` (2 failed: e2e/playwright)
+- DAY_DONE: Day4 | files: src/core/scheduler.py, api/server.py, config/settings.yaml, web/templates/settings.html | test_result: `python3.11 -m pytest -q` (2 failed: e2e/playwright)
+
+**验证**:
+- `python3.11 -m pytest -q` → `2 failed, 121 passed, 18 warnings`
+  - 失败: `tests/e2e/test_frontend_playwright.py::test_accounts_page_can_create_and_validate_account`
+  - 失败: `tests/e2e/test_frontend_playwright.py::test_publish_page_supports_cancel_retry_manual_and_partial_recovery`

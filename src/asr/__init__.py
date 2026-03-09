@@ -31,10 +31,10 @@ class ASRRouter:
         self.config = config or Config()
         asr_cfg = self.config.get("asr", default={}) or {}
 
-        provider = str(asr_cfg.get("provider", "klicstudio")).strip().lower()
-        self.provider = provider if provider in SUPPORTED_ASR_PROVIDERS else "klicstudio"
+        provider = str(asr_cfg.get("provider", "auto")).strip().lower()
+        self.provider = provider if provider in SUPPORTED_ASR_PROVIDERS else "auto"
         self.allow_fallback = bool(asr_cfg.get("allow_fallback", True))
-        self.allow_klicstudio_fallback = bool(asr_cfg.get("allow_klicstudio_fallback", True))
+        self.allow_klicstudio_fallback = bool(asr_cfg.get("allow_klicstudio_fallback", False))
         self.youtube_skip_download = bool(asr_cfg.get("youtube_skip_download", False))
 
         fallback_order = asr_cfg.get("fallback_order", ["youtube", "volcengine", "whisper"])
@@ -102,7 +102,7 @@ class ASRRouter:
         """
         methods = self._resolve_method_chain(video_url=video_url)
         if not methods:
-            raise RuntimeError("ASRRouter 未启用（provider=klicstudio 或配置无效）")
+            raise RuntimeError("ASRRouter 未启用（provider 配置为旧模式或无效）")
 
         errors: List[str] = []
         for method in methods:

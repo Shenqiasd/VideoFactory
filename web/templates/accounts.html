@@ -12,7 +12,11 @@
     <!-- Add Account Form -->
     <div class="rounded-3xl border border-border p-6 shadow-card">
         <h2 class="text-[15px] font-semibold text-fg-strong mb-4">添加账号</h2>
-        <form @submit.prevent="addAccount" class="grid grid-cols-3 gap-4">
+        <div class="mb-4 rounded-2xl bg-muted/60 px-4 py-3 text-[12px] text-fg-sub">
+            <div>Cookie 归档目录：<span class="text-fg-strong" x-text="storageDir || '加载中...'"></span></div>
+            <div class="mt-1">支持格式：JSON、Netscape cookies.txt</div>
+        </div>
+        <form @submit.prevent="addAccount" class="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
                 <label class="block text-[12px] text-fg-sub mb-1.5">平台</label>
                 <select x-model="form.platform" required class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none">
@@ -25,12 +29,27 @@
             </div>
             <div>
                 <label class="block text-[12px] text-fg-sub mb-1.5">账号名</label>
-                <input x-model="form.username" type="text" required placeholder="输入账号名" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                <input x-model="form.name" type="text" required placeholder="输入账号名" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+            </div>
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1.5">Cookie 路径</label>
+                <input x-model="form.cookie_path" type="text" placeholder="/path/to/cookies.json" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+            </div>
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1.5">上传 Cookie 文件</label>
+                <input x-ref="cookieFile" @change="onFileChange" type="file" accept=".json,.txt" class="w-full h-10 px-3 rounded-2xl border border-border text-[13px] text-fg-strong file:mr-3 file:border-0 file:bg-muted file:px-3 file:py-1.5 file:rounded-xl" />
             </div>
             <div class="flex items-end">
                 <button type="submit" class="w-full h-10 px-4 rounded-2xl bg-black text-white text-[13px] font-semibold hover:bg-fg-strong transition">添加</button>
             </div>
         </form>
+        <label class="mt-3 inline-flex items-center gap-2 text-[13px] text-fg-sub">
+            <input x-model="form.is_default" type="checkbox" class="w-4 h-4 rounded accent-fg-strong" />
+            <span>创建后设为该平台默认账号</span>
+        </label>
+        <div x-show="selectedFileName" x-cloak class="mt-3 text-[12px] text-fg-sub">
+            已选择文件：<span class="text-fg-strong" x-text="selectedFileName"></span>
+        </div>
     </div>
 
     <!-- Accounts List -->
@@ -44,7 +63,8 @@
                     <tr>
                         <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">平台</th>
                         <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">账号名</th>
-                        <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">添加时间</th>
+                        <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">状态</th>
+                        <th class="px-6 py-3 text-left text-[12px] font-semibold text-fg-sub">时间</th>
                         <th class="px-6 py-3 text-right text-[12px] font-semibold text-fg-sub">操作</th>
                     </tr>
                 </thead>
@@ -52,15 +72,40 @@
                     <template x-for="account in accounts" :key="account.id">
                         <tr class="hover:bg-muted/20 transition">
                             <td class="px-6 py-4 text-[13px] text-fg-strong" x-text="account.platform"></td>
-                            <td class="px-6 py-4 text-[13px] text-fg-strong" x-text="account.username"></td>
-                            <td class="px-6 py-4 text-[13px] text-fg-sub" x-text="account.created_at"></td>
+                            <td class="px-6 py-4">
+                                <div class="text-[13px] text-fg-strong" x-text="account.name"></div>
+                                <div class="text-[11px] text-fg-sub mt-1">
+                                    文件：<span class="text-fg-strong" x-text="account.cookie_filename || '-'"></span>
+                                </div>
+                                <div class="text-[11px] text-fg-sub mt-1 break-all" x-text="account.cookie_path || '-'"></div>
+                            </td>
+                            <td class="px-6 py-4 text-[13px] text-fg-sub">
+                                <div x-text="account.is_default ? '默认 / ' + account.status : account.status"></div>
+                                <div class="text-[11px] text-fg-sub mt-1" x-show="account.capabilities && account.capabilities.format_kind">
+                                    格式：<span x-text="account.capabilities?.format_kind || '-'"></span>
+                                </div>
+                                <div class="text-[11px] text-fg-sub mt-1" x-show="account.capabilities && account.capabilities.platform_cookie_match === true">
+                                    平台匹配：是
+                                </div>
+                                <div class="text-[11px] text-amber-700 mt-1" x-show="account.last_error" x-text="account.last_error"></div>
+                            </td>
+                            <td class="px-6 py-4 text-[13px] text-fg-sub">
+                                <div>创建：<span x-text="account.created_at"></span></div>
+                                <div class="text-[11px] mt-1" x-show="account.last_test">检测：<span x-text="account.last_test"></span></div>
+                            </td>
                             <td class="px-6 py-4 text-right">
+                                <button @click="testAccount(account.id)" class="px-3 py-1.5 rounded-xl bg-muted text-fg text-[12px] font-medium hover:bg-muted-dark transition">检测</button>
+                                <button x-show="!account.is_default" @click="setDefault(account.id)" class="ml-2 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-600 text-[12px] font-medium hover:bg-blue-100 transition">设为默认</button>
+                                <label class="ml-2 inline-flex items-center px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-[12px] font-medium hover:bg-emerald-100 transition cursor-pointer">
+                                    <input type="file" class="hidden" accept=".json,.txt" @change="replaceCookie(account.id, $event)" />
+                                    重新上传 Cookie
+                                </label>
                                 <button @click="deleteAccount(account.id)" class="px-3 py-1.5 rounded-xl bg-red-50 text-red-600 text-[12px] font-medium hover:bg-red-100 transition">删除</button>
                             </td>
                         </tr>
                     </template>
                     <tr x-show="accounts.length === 0">
-                        <td colspan="4" class="px-6 py-8 text-center text-[13px] text-fg-sub">暂无账号</td>
+                        <td colspan="5" class="px-6 py-8 text-center text-[13px] text-fg-sub">暂无账号</td>
                     </tr>
                 </tbody>
             </table>
@@ -72,15 +117,28 @@
 function accountsApp() {
     return {
         accounts: [],
-        form: { platform: '', username: '' },
+        storageDir: '',
+        form: { platform: '', name: '', cookie_path: '', is_default: false },
+        selectedFileName: '',
 
         async init() {
+            await this.loadConfig();
             await this.loadAccounts();
+        },
+
+        async loadConfig() {
+            try {
+                const res = await fetch('/api/publish/accounts/config');
+                const data = await res.json();
+                this.storageDir = data.storage_dir || '';
+            } catch (e) {
+                console.error('配置加载失败:', e);
+            }
         },
 
         async loadAccounts() {
             try {
-                const res = await fetch('/api/accounts');
+                const res = await fetch('/api/publish/accounts');
                 const data = await res.json();
                 this.accounts = data.accounts || [];
             } catch (e) {
@@ -90,27 +148,114 @@ function accountsApp() {
 
         async addAccount() {
             try {
-                const res = await fetch('/api/accounts', {
+                const payload = new FormData();
+                payload.append('platform', this.form.platform);
+                payload.append('name', this.form.name);
+                payload.append('cookie_path', this.form.cookie_path || '');
+                payload.append('is_default', this.form.is_default ? 'true' : 'false');
+                const file = this.$refs.cookieFile?.files?.[0];
+                if (file) payload.append('cookie_file', file);
+
+                const res = await fetch('/api/publish/accounts/upload', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.form)
+                    body: payload
                 });
                 if (res.ok) {
-                    this.form = { platform: '', username: '' };
+                    this.form = { platform: '', name: '', cookie_path: '', is_default: false };
+                    this.selectedFileName = '';
+                    if (this.$refs.cookieFile) this.$refs.cookieFile.value = '';
                     await this.loadAccounts();
+                    window.showToast?.('账号已添加', 'success');
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    window.showToast?.(err.detail || '添加失败', 'error');
                 }
             } catch (e) {
                 console.error('添加失败:', e);
+                window.showToast?.('添加失败', 'error');
+            }
+        },
+
+        onFileChange(e) {
+            const file = e.target.files?.[0];
+            this.selectedFileName = file ? file.name : '';
+        },
+
+        async replaceCookie(id, event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            try {
+                const payload = new FormData();
+                payload.append('cookie_file', file);
+                const res = await fetch(`/api/publish/accounts/${id}/cookie`, {
+                    method: 'POST',
+                    body: payload
+                });
+                if (res.ok) {
+                    await this.loadAccounts();
+                    window.showToast?.('Cookie 已更新', 'success');
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    window.showToast?.(err.detail || '更新 Cookie 失败', 'error');
+                }
+            } catch (e) {
+                console.error('更新 Cookie 失败:', e);
+                window.showToast?.('更新 Cookie 失败', 'error');
+            } finally {
+                event.target.value = '';
+            }
+        },
+
+        async testAccount(id) {
+            try {
+                const res = await fetch(`/api/publish/accounts/${id}/test`, { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    await this.loadAccounts();
+                    if (data.success) {
+                        window.showToast?.('账号检测通过', 'success');
+                    } else {
+                        window.showToast?.(data.last_error || '账号检测未通过', 'error');
+                    }
+                } else {
+                    window.showToast?.(data.detail || '检测失败', 'error');
+                }
+            } catch (e) {
+                console.error('检测失败:', e);
+                window.showToast?.('检测失败', 'error');
+            }
+        },
+
+        async setDefault(id) {
+            try {
+                const res = await fetch(`/api/publish/accounts/${id}/default`, { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    await this.loadAccounts();
+                    window.showToast?.('默认账号已更新', 'success');
+                } else {
+                    window.showToast?.(data.detail || '设置默认账号失败', 'error');
+                }
+            } catch (e) {
+                console.error('设置默认账号失败:', e);
+                window.showToast?.('设置默认账号失败', 'error');
             }
         },
 
         async deleteAccount(id) {
             if (!confirm('确认删除此账号？')) return;
             try {
-                const res = await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
-                if (res.ok) await this.loadAccounts();
+                const res = await fetch(`/api/publish/accounts/${id}`, { method: 'DELETE' });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    await this.loadAccounts();
+                    window.showToast?.('账号已删除', 'success');
+                } else {
+                    window.showToast?.(data.detail || '删除失败', 'error');
+                }
             } catch (e) {
                 console.error('删除失败:', e);
+                window.showToast?.('删除失败', 'error');
             }
         }
     }

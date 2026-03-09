@@ -1,8 +1,8 @@
 {
-  "step": "step3_implementation",
-  "status": "ready_for_codex",
-  "task": "火山引擎翻译+TTS完整集成",
+  "step": "step5_release",
+  "status": "completed",
+  "task": "发布管理 + 存储管理 + 自管翻译链路整合提交",
   "owner": "codex",
-  "updated_at": "2026-03-04T08:20:00Z",
-  "note": "需求分解+设计完成，交付 Codex 实施"
+  "updated_at": "2026-03-09T13:25:00Z",
+  "note": "全量 pytest 通过，文档已同步，待推送到 GitHub"
 }

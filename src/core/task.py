@@ -31,6 +31,7 @@ class TaskState(str, Enum):
     UPLOADING_PRODUCTS = "uploading_products"  # 上传成品到R2
     READY_TO_PUBLISH = "ready_to_publish"  # 待发布
     PUBLISHING = "publishing"              # 发布中
+    PARTIAL_SUCCESS = "partial_success"    # 部分发布成功
     COMPLETED = "completed"                # 全部完成
     FAILED = "failed"                      # 失败
 
@@ -90,9 +91,10 @@ VALID_TRANSITIONS = {
     TaskState.PROCESSING: [TaskState.UPLOADING_PRODUCTS, TaskState.FAILED],
     TaskState.UPLOADING_PRODUCTS: [TaskState.READY_TO_PUBLISH, TaskState.FAILED],
     TaskState.READY_TO_PUBLISH: [TaskState.PUBLISHING, TaskState.COMPLETED],  # COMPLETED: dub_and_copy 跳过发布
-    TaskState.PUBLISHING: [TaskState.COMPLETED, TaskState.FAILED],
+    TaskState.PUBLISHING: [TaskState.COMPLETED, TaskState.PARTIAL_SUCCESS, TaskState.FAILED],
+    TaskState.PARTIAL_SUCCESS: [TaskState.PUBLISHING, TaskState.QUEUED],
     TaskState.COMPLETED: [],
-    TaskState.FAILED: [TaskState.QUEUED],
+    TaskState.FAILED: [TaskState.QUEUED, TaskState.PUBLISHING],
 }
 
 
@@ -167,6 +169,7 @@ class Task:
     embed_subtitle_type: str = "horizontal"  # horizontal/vertical/none
     subtitle_style: Dict[str, Any] = field(default_factory=dict)
     priority: int = 2  # 0=紧急 1=高 2=普通 3=低
+    publish_accounts: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.task_id:

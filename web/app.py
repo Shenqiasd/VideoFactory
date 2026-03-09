@@ -4,14 +4,16 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 from distribute.scheduler import PublishScheduler
 from core.task import TaskStore
 from core.database import Database
+from api.routes import storage as storage_routes
 
 router = APIRouter()
 
@@ -50,45 +52,29 @@ class CreateTaskRequest(BaseModel):
 
 @router.post("/api/publish/tasks")
 async def create_publish_task(request: CreateTaskRequest):
-    """创建发布任务"""
-    scheduler = get_scheduler()
-    job = scheduler._create_job(
-        task_id=request.task_id,
-        platform=request.platform,
-        scheduled_time=request.scheduled_time,
-        product=request.product
+    """兼容旧接口，提示迁移到 distribute API。"""
+    raise HTTPException(
+        status_code=410,
+        detail="旧接口已废弃，请改用 /api/distribute/publish 和 /api/distribute/queue"
     )
-    scheduler._queue.append(job)
-    scheduler._save_queue()
-
-    return {"message": "任务已创建", "job": job.to_dict()}
 
 
 @router.get("/api/publish/tasks")
 async def get_publish_tasks(status: Optional[str] = None):
-    """获取发布任务列表"""
-    scheduler = get_scheduler()
-    jobs = scheduler._queue
-
-    if status:
-        jobs = [j for j in jobs if j.status == status]
-
-    return {"tasks": [j.to_dict() for j in jobs], "total": len(jobs)}
+    """兼容旧接口，提示迁移到 distribute API。"""
+    raise HTTPException(
+        status_code=410,
+        detail="旧接口已废弃，请改用 /api/distribute/queue"
+    )
 
 
 @router.delete("/api/publish/tasks/{task_id}")
 async def delete_publish_task(task_id: str):
-    """删除发布任务"""
-    scheduler = get_scheduler()
-    initial_count = len(scheduler._queue)
-    scheduler._queue = [j for j in scheduler._queue if j.task_id != task_id]
-    deleted = initial_count - len(scheduler._queue)
-
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="任务不存在")
-
-    scheduler._save_queue()
-    return {"message": f"已删除 {deleted} 个任务", "deleted_count": deleted}
+    """兼容旧接口，提示迁移到 distribute API。"""
+    raise HTTPException(
+        status_code=410,
+        detail="旧接口已废弃，请改用 /api/distribute/cancel"
+    )
 
 
 @router.post("/api/publish/accounts/{id}/test")
@@ -111,3 +97,33 @@ async def test_account(id: str):
         "cookie_exists": cookie_exists,
         "tested_at": datetime.now().isoformat()
     }
+
+
+# ----------------------------------------------------------------------------
+# Storage management compatibility endpoints
+# ----------------------------------------------------------------------------
+
+
+@router.get("/api/storage/files")
+async def get_storage_files(location: str = "r2", path: str = "raw"):
+    return await storage_routes.get_storage_files(location=location, path=path)
+
+
+@router.delete("/api/storage/files")
+async def delete_storage_files(request: Request):
+    return await storage_routes.delete_storage_files(request)
+
+
+@router.post("/api/storage/cleanup")
+async def cleanup_storage(request: Request):
+    return await storage_routes.cleanup_storage(request)
+
+
+@router.get("/api/storage/cleanup-config")
+async def get_cleanup_config():
+    return await storage_routes.get_cleanup_config()
+
+
+@router.put("/api/storage/cleanup-config")
+async def update_cleanup_config(request: Request):
+    return await storage_routes.update_cleanup_config(request)

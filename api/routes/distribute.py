@@ -35,16 +35,56 @@ class PublishRequest(BaseModel):
     """发布请求"""
     task_id: str = Field(..., description="任务ID")
     platforms: List[str] = Field(default=["bilibili", "douyin", "xiaohongshu", "youtube"])
+    publish_accounts: dict[str, str] = Field(default_factory=dict, description="平台到账号ID的绑定")
     mode: str = Field("immediate", description="发布模式: immediate/staggered/scheduled")
     interval_minutes: int = Field(30, description="错峰发布间隔（分钟）")
     force_republish: bool = Field(False, description="是否忽略幂等键强制重新调度")
 
 
+def _validate_publish_accounts(account_map: dict[str, str], platforms: List[str]) -> dict[str, str]:
+    if not account_map:
+        return {}
+
+    from core.database import Database
+
+    db = Database()
+    normalized: dict[str, str] = {}
+    for platform, account_id in account_map.items():
+        if not account_id or platform not in platforms:
+            continue
+        account = db.get_account(account_id)
+        if not account:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "ACCOUNT_NOT_FOUND", "message": f"账号不存在: {account_id}"},
+            )
+        if account.get("platform") != platform:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "ACCOUNT_PLATFORM_MISMATCH",
+                    "message": f"账号 {account.get('name', account_id)} 不属于平台 {platform}",
+                },
+            )
+        normalized[platform] = account_id
+    return normalized
+
+
 class ReplayRequest(BaseModel):
     """重放失败发布任务"""
     task_id: str
+    job_id: str = ""
     platform: str = ""
     product_type: str = ""
+
+
+class ManualReviewRequest(BaseModel):
+    """手动发布确认"""
+    task_id: str
+    job_id: str
+    publish_url: str = ""
+    error: str = ""
+    note: str = ""
 
 
 async def _run_due_jobs(scheduler: PublishScheduler):
@@ -73,6 +113,10 @@ async def publish(request: PublishRequest, background_tasks: BackgroundTasks):
     if not task.products:
         raise HTTPException(status_code=400, detail={"code": "NO_PRODUCTS", "message": "任务没有产出物"})
 
+    publish_accounts = _validate_publish_accounts(request.publish_accounts, request.platforms)
+    if publish_accounts:
+        task.publish_accounts.update(publish_accounts)
+
     scheduler = get_scheduler()
     if request.mode == "immediate":
         stats = scheduler.schedule_immediate(task, request.platforms, force=request.force_republish)
@@ -99,6 +143,7 @@ async def publish(request: PublishRequest, background_tasks: BackgroundTasks):
         "message": f"发布已调度 ({request.mode})",
         "task_id": task.task_id,
         "platforms": request.platforms,
+        "publish_accounts": publish_accounts,
         "products_count": len(task.products),
         "added_jobs": stats["added"],
         "skipped_jobs": stats["skipped"],
@@ -138,6 +183,19 @@ async def get_publish_status(task_id: str):
     }
 
 
+@router.get("/events/{task_id}")
+async def get_publish_events(task_id: str, limit: int = 100):
+    from core.database import Database
+
+    db = Database()
+    events = db.get_publish_job_events(task_id=task_id, limit=max(1, min(limit, 200)))
+    return {
+        "task_id": task_id,
+        "count": len(events),
+        "events": events,
+    }
+
+
 @router.post("/replay")
 async def replay_failed_publish(request: ReplayRequest, background_tasks: BackgroundTasks):
     """重放失败的发布任务"""
@@ -149,6 +207,7 @@ async def replay_failed_publish(request: ReplayRequest, background_tasks: Backgr
     scheduler = get_scheduler()
     replayed = scheduler.replay_failed(
         task_id=request.task_id,
+        job_id=request.job_id or None,
         platform=request.platform or None,
         product_type=request.product_type or None,
     )
@@ -158,7 +217,10 @@ async def replay_failed_publish(request: ReplayRequest, background_tasks: Backgr
             detail={"code": "NO_FAILED_JOBS", "message": "没有可重放的失败发布任务"},
         )
 
-    if task.state != TaskState.PUBLISHING.value:
+    if task.state == TaskState.PARTIAL_SUCCESS.value:
+        task.transition(TaskState.PUBLISHING)
+        store.update(task)
+    elif task.state != TaskState.PUBLISHING.value:
         if not task.transition(TaskState.PUBLISHING):
             # 允许从已完成/失败状态手动重放
             task.state = TaskState.PUBLISHING.value
@@ -170,6 +232,7 @@ async def replay_failed_publish(request: ReplayRequest, background_tasks: Backgr
         "message": "失败发布任务已重放",
         "task_id": request.task_id,
         "replayed_jobs": replayed,
+        "job_id": request.job_id or "all",
         "platform": request.platform or "all",
         "product_type": request.product_type or "all",
     }
@@ -239,6 +302,7 @@ async def retry_publish_task(task_id: str, background_tasks: BackgroundTasks):
 class CancelRequest(BaseModel):
     """取消发布任务"""
     task_id: str
+    job_id: str = ""
     platform: str = ""
 
 
@@ -246,16 +310,67 @@ class CancelRequest(BaseModel):
 async def cancel_publish_job(request: CancelRequest):
     """取消待发布或发布中的任务"""
     scheduler = get_scheduler()
-    cancelled = 0
-
-    for job in scheduler._queue:
-        if job.task_id == request.task_id and job.status in ("pending", "publishing"):
-            if not request.platform or job.platform == request.platform:
-                job.status = "failed"
-                job.error = "用户取消"
-                cancelled += 1
+    cancelled = scheduler.cancel(
+        task_id=request.task_id,
+        job_id=request.job_id or None,
+        platform=request.platform or None,
+    )
 
     if cancelled == 0:
         raise HTTPException(status_code=404, detail={"code": "NO_JOBS", "message": "没有可取消的任务"})
 
-    return {"message": "任务已取消", "cancelled": cancelled}
+    if task := get_task_store().get(request.task_id):
+        if task.state == TaskState.PUBLISHING.value:
+            await scheduler._check_task_completion(task.task_id)
+
+    return {
+        "message": "任务已取消",
+        "cancelled": cancelled,
+        "job_id": request.job_id or "all",
+    }
+
+
+@router.post("/manual/complete")
+async def complete_manual_publish(request: ManualReviewRequest):
+    """手动确认发布成功"""
+    scheduler = get_scheduler()
+    try:
+        job = await scheduler.mark_manual_result(
+            task_id=request.task_id,
+            job_id=request.job_id,
+            success=True,
+            publish_url=request.publish_url,
+            note=request.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_MANUAL_JOB", "message": str(exc)}) from exc
+
+    return {
+        "message": "手动发布已确认",
+        "task_id": request.task_id,
+        "job_id": request.job_id,
+        "job": job.to_dict(),
+    }
+
+
+@router.post("/manual/fail")
+async def fail_manual_publish(request: ManualReviewRequest):
+    """手动确认发布失败"""
+    scheduler = get_scheduler()
+    try:
+        job = await scheduler.mark_manual_result(
+            task_id=request.task_id,
+            job_id=request.job_id,
+            success=False,
+            error=request.error,
+            note=request.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_MANUAL_JOB", "message": str(exc)}) from exc
+
+    return {
+        "message": "手动发布失败已记录",
+        "task_id": request.task_id,
+        "job_id": request.job_id,
+        "job": job.to_dict(),
+    }

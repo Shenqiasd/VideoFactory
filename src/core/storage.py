@@ -4,8 +4,9 @@
 import subprocess
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import logging
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,120 @@ class StorageManager:
         except Exception as e:
             logger.error(f"列出文件异常: {e}")
             return []
+
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        """格式化文件大小"""
+        value = float(size_bytes)
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if value < 1024.0:
+                return f"{value:.1f} {unit}"
+            value /= 1024.0
+        return f"{value:.1f} PB"
+
+    @staticmethod
+    def _parse_time(iso_time: str) -> Optional[datetime]:
+        if not iso_time:
+            return None
+        try:
+            text = iso_time.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    @classmethod
+    def _format_time(cls, iso_time: str) -> str:
+        """格式化时间为相对时间"""
+        dt = cls._parse_time(iso_time)
+        if not dt:
+            return "unknown"
+        now = datetime.now(timezone.utc)
+        delta = now - dt
+        if delta.days > 0:
+            return f"{delta.days}d ago"
+        if delta.seconds >= 3600:
+            return f"{delta.seconds // 3600}h ago"
+        if delta.seconds >= 60:
+            return f"{delta.seconds // 60}m ago"
+        return "just now"
+
+    def list_files_with_details(self, r2_path: str = "") -> List[Dict[str, Any]]:
+        """
+        列出R2文件详情
+
+        使用 rclone lsjson 获取详细信息（递归）
+        """
+        try:
+            full_r2_path = f"{self.r2_prefix}/{r2_path}" if r2_path else self.r2_prefix
+            cmd = ["rclone", "lsjson", full_r2_path, "-R"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+            if result.returncode != 0:
+                logger.error(f"列出文件详情失败: {result.stderr}")
+                return []
+
+            import json
+            items = json.loads(result.stdout) if result.stdout else []
+            files: List[Dict[str, Any]] = []
+            for item in items:
+                if item.get("IsDir"):
+                    continue
+                path_value = item.get("Path") or item.get("Name") or item.get("path") or ""
+                name_value = item.get("Name") or Path(path_value).name
+                size_value = int(item.get("Size") or 0)
+                mod_time = item.get("ModTime") or item.get("mod_time") or ""
+                relative_path = f"{r2_path}/{path_value}".strip("/") if r2_path else path_value
+                files.append(
+                    {
+                        "name": name_value,
+                        "size": size_value,
+                        "size_human": self._format_size(size_value),
+                        "modified": mod_time,
+                        "modified_human": self._format_time(mod_time),
+                        "path": relative_path,
+                    }
+                )
+            return files
+        except Exception as e:
+            logger.error(f"列出文件详情异常: {e}")
+            return []
+
+    def delete_files(self, r2_paths: List[str]) -> int:
+        """
+        批量删除R2文件
+        """
+        deleted = 0
+        for r2_path in r2_paths:
+            if not r2_path:
+                continue
+            if self.delete_from_r2(r2_path):
+                deleted += 1
+        return deleted
+
+    def cleanup_old_files(self, r2_path: str, days: int) -> Dict[str, Any]:
+        """
+        清理过期文件
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        files = self.list_files_with_details(r2_path)
+        deleted = 0
+        freed_bytes = 0
+        for item in files:
+            dt = self._parse_time(item.get("modified", ""))
+            if not dt:
+                continue
+            if dt < cutoff:
+                if self.delete_from_r2(item["path"]):
+                    deleted += 1
+                    freed_bytes += int(item.get("size", 0) or 0)
+                    logger.info(f"🗑️ 清理过期文件: {item['path']}")
+        return {
+            "deleted": deleted,
+            "freed_bytes": freed_bytes,
+            "freed_human": self._format_size(freed_bytes),
+        }
 
     def delete_from_r2(self, r2_path: str) -> bool:
         """
@@ -252,4 +367,110 @@ class LocalStorage:
             "used_gb": used // (2**30),
             "free_gb": free // (2**30),
             "usage_percent": (used / total) * 100
+        }
+
+    def _safe_join(self, base_dir: Path, relative_path: str) -> Optional[Path]:
+        if not relative_path:
+            return None
+        candidate = (base_dir / relative_path).resolve()
+        if base_dir.resolve() not in candidate.parents and candidate != base_dir.resolve():
+            return None
+        return candidate
+
+    def list_files_with_details(self, path: str = "working") -> List[Dict[str, Any]]:
+        """
+        列出本地文件详情
+        """
+        if path == "working":
+            base_dir = self.working_dir
+        elif path == "output":
+            base_dir = self.output_dir
+        else:
+            return []
+
+        files: List[Dict[str, Any]] = []
+        if not base_dir.exists():
+            return files
+
+        for root, _, filenames in os.walk(base_dir):
+            for filename in filenames:
+                filepath = Path(root) / filename
+                try:
+                    stat = filepath.stat()
+                except FileNotFoundError:
+                    continue
+                rel_path = str(filepath.relative_to(base_dir))
+                mod_time = datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat()
+                files.append(
+                    {
+                        "name": filename,
+                        "size": stat.st_size,
+                        "size_human": StorageManager._format_size(stat.st_size),
+                        "modified": mod_time,
+                        "modified_human": StorageManager._format_time(mod_time),
+                        "path": rel_path,
+                    }
+                )
+        return files
+
+    def delete_files(self, paths: List[str]) -> int:
+        """
+        批量删除本地文件
+        """
+        deleted = 0
+        for rel_path in paths:
+            if not rel_path:
+                continue
+            removed = False
+            for base_dir in [self.working_dir, self.output_dir]:
+                target = self._safe_join(base_dir, rel_path)
+                if not target or not target.exists():
+                    continue
+                try:
+                    target.unlink()
+                    logger.info(f"🗑️ 删除文件: {target}")
+                    deleted += 1
+                    removed = True
+                    break
+                except Exception as e:
+                    logger.error(f"删除文件失败: {target}, {e}")
+            if removed:
+                continue
+        return deleted
+
+    def cleanup_old_files(self, path: str, days: int) -> Dict[str, Any]:
+        """清理本地过期文件"""
+        if path == "working":
+            base_dir = self.working_dir
+        elif path == "output":
+            base_dir = self.output_dir
+        else:
+            return {"deleted": 0, "freed_bytes": 0, "freed_human": StorageManager._format_size(0)}
+
+        cutoff = datetime.now() - timedelta(days=days)
+        deleted = 0
+        freed_bytes = 0
+        if not base_dir.exists():
+            return {"deleted": 0, "freed_bytes": 0, "freed_human": StorageManager._format_size(0)}
+
+        for root, _, filenames in os.walk(base_dir):
+            for filename in filenames:
+                filepath = Path(root) / filename
+                try:
+                    stat = filepath.stat()
+                except FileNotFoundError:
+                    continue
+                file_time = datetime.fromtimestamp(stat.st_mtime)
+                if file_time < cutoff:
+                    try:
+                        filepath.unlink()
+                        deleted += 1
+                        freed_bytes += stat.st_size
+                        logger.info(f"🗑️ 清理过期文件: {filepath}")
+                    except Exception as e:
+                        logger.error(f"清理文件失败: {filepath}, {e}")
+        return {
+            "deleted": deleted,
+            "freed_bytes": freed_bytes,
+            "freed_human": StorageManager._format_size(freed_bytes),
         }

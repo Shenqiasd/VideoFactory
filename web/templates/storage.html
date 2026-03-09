@@ -37,26 +37,52 @@
                     <div class="h-full bg-fg-faint rounded-full" style="width: 0%"></div>
                 </div>
             </div>
+            <div class="text-[11px] text-fg-faint">详情见下方列表</div>
         </div>
     </div>
 </div>
 
-<!-- File Browser -->
-<div class="rounded-3xl border border-border shadow-card overflow-hidden">
-    <div class="px-6 py-4 border-b border-border flex items-center justify-between">
+<div class="rounded-3xl border border-border shadow-card overflow-hidden" x-data="storageManager()" x-init="init()">
+    <div class="px-6 py-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2 text-[13px] text-fg-sub">
-            <span class="text-fg-strong font-medium">r2:videoflow</span>
+            <span class="text-fg-strong font-medium" x-text="locationLabel"></span>
             <span>/</span>
-            <span>processed</span>
+            <span x-text="path"></span>
         </div>
-        <button class="h-8 px-3 rounded-xl border-2 border-border text-[12px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">
-            <i data-lucide="refresh-cw" class="w-3.5 h-3.5 inline mr-1"></i>
-            刷新
-        </button>
+        <div class="flex items-center gap-2">
+            <button @click="refresh" class="h-8 px-3 rounded-xl border-2 border-border text-[12px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5 inline mr-1"></i>
+                刷新
+            </button>
+            <button @click="cleanupOldFiles" class="h-8 px-3 rounded-xl bg-black text-white text-[12px] font-semibold hover:bg-fg-strong transition">
+                清理过期文件
+            </button>
+        </div>
     </div>
+
+    <div class="px-6 py-4 border-b border-border flex flex-wrap items-center gap-2">
+        <div class="flex items-center gap-2">
+            <button @click="switchLocation('r2')" :class="location === 'r2' ? activeTabClass : tabClass">R2 云存储</button>
+            <button @click="switchLocation('local')" :class="location === 'local' ? activeTabClass : tabClass">本地存储</button>
+        </div>
+        <div class="flex items-center gap-2" x-show="location === 'r2'">
+            <button @click="switchPath('raw')" :class="pathClass('raw')">raw</button>
+            <button @click="switchPath('processed')" :class="pathClass('processed')">processed</button>
+            <button @click="switchPath('ready')" :class="pathClass('ready')">ready</button>
+            <button @click="switchPath('archive')" :class="pathClass('archive')">archive</button>
+        </div>
+        <div class="flex items-center gap-2" x-show="location === 'local'">
+            <button @click="switchPath('working')" :class="pathClass('working')">working</button>
+            <button @click="switchPath('output')" :class="pathClass('output')">output</button>
+        </div>
+    </div>
+
     <table class="w-full text-[14px]">
         <thead>
             <tr class="border-b border-border text-left">
+                <th class="px-6 py-3 text-[12px] font-medium text-fg-sub w-10">
+                    <input type="checkbox" class="rounded" @change="toggleAll" :checked="selected.length === files.length && files.length > 0" />
+                </th>
                 <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">名称</th>
                 <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">大小</th>
                 <th class="px-6 py-3 text-[12px] font-medium text-fg-sub">修改时间</th>
@@ -64,12 +90,173 @@
             </tr>
         </thead>
         <tbody>
-            <tr>
-                <td colspan="4" class="px-6 py-16 text-center text-fg-sub text-[14px]">
-                    暂无文件
-                </td>
-            </tr>
+            <template x-if="loading">
+                <tr>
+                    <td colspan="5" class="px-6 py-10 text-center text-fg-sub text-[13px]">加载中...</td>
+                </tr>
+            </template>
+            <template x-if="!loading && files.length === 0">
+                <tr>
+                    <td colspan="5" class="px-6 py-16 text-center text-fg-sub text-[14px]">
+                        暂无文件
+                    </td>
+                </tr>
+            </template>
+            <template x-for="file in files" :key="file.path">
+                <tr class="border-b border-border/70">
+                    <td class="px-6 py-3">
+                        <input type="checkbox" class="rounded" :value="file.path" x-model="selected" />
+                    </td>
+                    <td class="px-6 py-3 text-fg-strong" x-text="file.name"></td>
+                    <td class="px-6 py-3 text-fg-sub font-mono" x-text="file.size_human"></td>
+                    <td class="px-6 py-3 text-fg-sub" x-text="file.modified_human"></td>
+                    <td class="px-6 py-3">
+                        <button @click="deleteFile(file.path)" class="text-red-600 text-[12px] font-medium hover:underline">删除</button>
+                    </td>
+                </tr>
+            </template>
         </tbody>
     </table>
+
+    <div class="px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="text-[12px] text-fg-sub">
+            共 <span x-text="files.length"></span> 个文件，已选 <span x-text="selected.length"></span> 个
+        </div>
+        <div class="flex items-center gap-2">
+            <button @click="deleteSelected" :disabled="selected.length === 0" class="h-8 px-3 rounded-xl border-2 border-border text-[12px] font-medium text-fg hover:bg-muted hover:border-fg-faint disabled:opacity-40 disabled:cursor-not-allowed transition">
+                删除选中
+            </button>
+        </div>
+    </div>
 </div>
+
+<script>
+function storageManager() {
+    const tabClass = 'h-8 px-3 rounded-xl border-2 border-border text-[12px] font-medium text-fg hover:bg-muted hover:border-fg-faint transition';
+    const activeTabClass = 'h-8 px-3 rounded-xl bg-black text-white text-[12px] font-semibold transition';
+    const toast = (msg, type) => {
+        if (typeof showToast === 'function') {
+            showToast(msg, type || 'info');
+        } else {
+            alert(msg);
+        }
+    };
+
+    return {
+        location: 'r2',
+        path: 'raw',
+        files: [],
+        selected: [],
+        loading: false,
+        tabClass,
+        activeTabClass,
+
+        get locationLabel() {
+            return this.location === 'r2' ? 'r2:videoflow' : 'local';
+        },
+
+        async init() {
+            await this.loadFiles();
+        },
+
+        async loadFiles() {
+            this.loading = true;
+            try {
+                const resp = await fetch(`/api/storage/files?location=${this.location}&path=${this.path}`);
+                if (!resp.ok) throw new Error('load_failed');
+                const data = await resp.json();
+                this.files = data.files || [];
+            } catch (e) {
+                toast('加载失败', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async refresh() {
+            await this.loadFiles();
+        },
+
+        async switchLocation(loc) {
+            this.location = loc;
+            this.path = loc === 'r2' ? 'raw' : 'working';
+            this.selected = [];
+            await this.loadFiles();
+        },
+
+        async switchPath(p) {
+            this.path = p;
+            this.selected = [];
+            await this.loadFiles();
+        },
+
+        pathClass(p) {
+            return this.path === p ? activeTabClass : tabClass;
+        },
+
+        toggleAll(event) {
+            if (event.target.checked) {
+                this.selected = this.files.map(f => f.path);
+            } else {
+                this.selected = [];
+            }
+        },
+
+        async deleteFile(path) {
+            if (!confirm('确定删除此文件？')) return;
+            await this.deleteFiles([path]);
+        },
+
+        async deleteSelected() {
+            if (this.selected.length === 0) return;
+            if (!confirm(`确定删除选中的 ${this.selected.length} 个文件？`)) return;
+            await this.deleteFiles(this.selected);
+        },
+
+        async deleteFiles(paths) {
+            try {
+                const resp = await fetch('/api/storage/files', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ location: this.location, paths })
+                });
+                if (!resp.ok) throw new Error('delete_failed');
+                const data = await resp.json();
+                toast(`成功删除 ${data.deleted || 0} 个文件`, 'success');
+                this.selected = [];
+                await this.loadFiles();
+            } catch (e) {
+                toast('删除失败', 'error');
+            }
+        },
+
+        async cleanupOldFiles() {
+            const days = prompt('清理多少天前的文件？', '7');
+            if (!days) return;
+            const daysNum = parseInt(days, 10);
+            if (!daysNum || daysNum <= 0) {
+                toast('请输入有效天数', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/storage/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        location: this.location,
+                        path: this.path,
+                        days: daysNum
+                    })
+                });
+                if (!resp.ok) throw new Error('cleanup_failed');
+                const data = await resp.json();
+                toast(`清理完成：删除 ${data.deleted || 0} 个文件，释放 ${data.freed_human || '0 B'}`, 'success');
+                await this.loadFiles();
+            } catch (e) {
+                toast('清理失败', 'error');
+            }
+        }
+    }
+}
+</script>
 {% endblock %}

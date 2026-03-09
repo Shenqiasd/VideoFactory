@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from source.ytdlp_runtime import build_ytdlp_base_cmd
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,8 +54,7 @@ class VideoDownloader:
         if not format_spec:
             format_spec = f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]"
 
-        cmd = [
-            "yt-dlp",
+        cmd = build_ytdlp_base_cmd() + [
             "-f", format_spec,
             "--merge-output-format", "mp4",
             "-o", output_template,
@@ -123,8 +124,7 @@ class VideoDownloader:
         Returns:
             Optional[Dict]: 视频信息
         """
-        cmd = [
-            "yt-dlp",
+        cmd = build_ytdlp_base_cmd() + [
             "--dump-json",
             "--no-download",
             "--no-playlist",

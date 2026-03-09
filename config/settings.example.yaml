@@ -1,7 +1,7 @@
 # VideoFactory 配置模板
 # 复制此文件为 settings.yaml 并填入实际配置
 
-# KlicStudio配置
+# KlicStudio配置（仅保留兼容字段，主流程不再依赖）
 klicstudio:
   base_url: "http://127.0.0.1:8888"
   timeout: 3600
@@ -15,23 +15,49 @@ llm:
 # ASR配置
 asr:
   provider: auto
+  allow_fallback: true
+  allow_klicstudio_fallback: false
+  allow_router_with_tts: true
+  fallback_order:
+    - youtube
+    - volcengine
+    - whisper
+  youtube_skip_download: false
+  youtube_preferred_langs:
+    - en
+    - en-US
+    - en-GB
   youtube:
     enabled: true
   whisper:
     enabled: true
     base_url: "http://127.0.0.1:8866/v1"
+    model: "whisper-1"
+    timeout: 600
   volcengine:
     enabled: false
     app_id: "YOUR_APP_ID"
     token: "YOUR_TOKEN"
+    http_url: ""
+    ws_url: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+    timeout: 120
 
 # TTS配置
 tts:
-  provider: "klicstudio"
+  provider: "volcengine"
+  fallback_order:
+    - volcengine
   volcengine:
-    enabled: false
-    app_id: "YOUR_APP_ID"
-    token: "YOUR_TOKEN"
+    enabled: true
+    appid: "YOUR_APP_ID"
+    access_token: "YOUR_TOKEN"
+    resource_id: "seed-tts-1.0"
+    cluster: "volcano_tts"
+    api_url: "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
+    default_voice: "zh_female_shuangkuaisisi_moon_bigtts"
+    encoding: "mp3"
+    sample_rate: 24000
+    timeout: 120
 
 # 存储配置
 storage:

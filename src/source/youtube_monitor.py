@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 
+from source.ytdlp_runtime import build_ytdlp_base_cmd
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,8 +59,7 @@ class YouTubeMonitor:
         Returns:
             List[Dict]: 新视频列表
         """
-        cmd = [
-            "yt-dlp",
+        cmd = build_ytdlp_base_cmd() + [
             "--flat-playlist",
             "--dump-json",
             "--playlist-end", str(max_results),

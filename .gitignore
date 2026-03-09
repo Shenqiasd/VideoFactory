@@ -31,6 +31,14 @@ env/
 *.swp
 *.swo
 *~
+.claude/settings.local*.json
+.claude/*.local*.json
+.claude/settings.json
+
+# Local collaboration tooling
+FlowPilot/
+.flowpilot/
+.workflow/
 
 # Testing
 .pytest_cache/
