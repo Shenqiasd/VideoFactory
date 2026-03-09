@@ -33,6 +33,7 @@ env/
 *~
 .claude/settings.local*.json
 .claude/*.local*.json
+.claude/settings.json
 
 # Local collaboration tooling
 FlowPilot/
