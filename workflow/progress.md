@@ -541,3 +541,10 @@
 - `python3.11 -m pytest -q` → `2 failed, 121 passed, 18 warnings`
   - 失败: `tests/e2e/test_frontend_playwright.py::test_accounts_page_can_create_and_validate_account`
   - 失败: `tests/e2e/test_frontend_playwright.py::test_publish_page_supports_cancel_retry_manual_and_partial_recovery`
+- 15:40 [Codex] 修复运行中任务缺失 `yt-dlp` 的下载故障
+  - `requirements.txt` 新增 `yt-dlp`，并在 `src/source/ytdlp_runtime.py` 优先解析当前 `.venv/bin/yt-dlp`，必要时回落 `python -m yt_dlp`
+  - `src/production/pipeline.py` 为 `yt-dlp` 缺失增加明确错误分型，避免继续落到通用 `PRODUCTION_PIPELINE_EXCEPTION`
+  - 验证命令：`./.venv/bin/python -m pytest -q tests/web/test_ytdlp_runtime.py tests/test_production_error_classification.py`
+- 15:53 [Codex] 修复 `uploading_source` 阶段缺失 `rclone` 导致的本地链路中断
+  - `src/production/pipeline.py` 将源文件上传 R2 调整为 best-effort：上传失败时保留本地源视频继续执行
+  - 新增回归测试覆盖 R2 上传失败时不中断主链路

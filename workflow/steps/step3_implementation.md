@@ -31,6 +31,8 @@
   - `TaskState.active_states()` 补入 `qc_passed`，确保 UI、任务统计接口与系统状态统计一致
   - 任务列表支持保持 `?status=` 查询参数，筛选状态下删除任务会按当前过滤条件刷新
   - 任务详情页补齐翻译/QC 元信息，并能基于 `timeline` 展示失败任务卡在哪个阶段
+  - Hotfix：补齐 `yt-dlp` Python 依赖，并让下载链路优先解析当前 `.venv` 内的 `yt-dlp`，避免运行中的 API/Worker 因 PATH 缺失直接抛 `[Errno 2]`
+  - Hotfix：`uploading_source` 阶段改为 best-effort，缺失 `rclone` 或 R2 不可用时继续走本地源视频主链路，不再直接 fail
 - 兼容性说明：
   - 历史任务 JSON 中的 `klic_task_id` / `klic_progress` 会在加载时自动迁移到新字段
   - 旧 `settings.yaml` 中若仍存在 `klicstudio` provider，读取时会自动归一化为当前支持值

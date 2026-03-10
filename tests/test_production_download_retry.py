@@ -148,3 +148,33 @@ async def test_step_download_skip_in_youtube_subtitle_mode(monkeypatch, tmp_path
 
     assert ok is True
     assert task.state == TaskState.DOWNLOADED.value
+
+
+@pytest.mark.asyncio
+async def test_step_upload_source_falls_back_to_local_when_r2_upload_fails(tmp_path):
+    store = TaskStore(store_path=str(tmp_path / "tasks.json"))
+    task = store.create(source_url="https://www.youtube.com/watch?v=test")
+    pipeline = ProductionPipeline(task_store=store, notifier=NoopNotifier())
+
+    working_dir = tmp_path / "working" / task.task_id
+    working_dir.mkdir(parents=True, exist_ok=True)
+    source_video = working_dir / "source_video.mp4"
+    source_video.write_bytes(b"x" * 1_500_000)
+    task.source_local_path = str(source_video)
+    task.state = TaskState.DOWNLOADED.value
+    task.last_step = TaskState.DOWNLOADED.value
+    store.update(task)
+
+    class FailingStorage:
+        def upload_to_r2(self, local_path: str, r2_path: str) -> bool:
+            return False
+
+    pipeline.storage = FailingStorage()
+
+    ok = await pipeline._step_upload_source(task, working_dir)
+
+    assert ok is True
+    assert task.state == TaskState.UPLOADING_SOURCE.value
+    assert task.source_local_path == str(source_video)
+    assert task.source_r2_path == ""
+    assert task.last_error_code == ""

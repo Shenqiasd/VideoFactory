@@ -249,6 +249,8 @@ class ProductionPipeline:
     def classify_download_failure(error_msg: str, has_cookies: bool) -> tuple[str, str]:
         """下载失败分型，返回 (error_code, display_message)。"""
         normalized = (error_msg or "").lower()
+        if "yt-dlp is not installed" in normalized or ("no such file or directory" in normalized and "yt-dlp" in normalized):
+            return "DOWNLOAD_YTDLP_MISSING", "yt-dlp 未安装到当前运行环境，请执行 `./.venv/bin/python -m pip install -r requirements.txt` 后重试"
         if "js challenge provider" in normalized or "[jsc]" in normalized:
             return "DOWNLOAD_YTDLP_JS_RUNTIME", "yt-dlp 的 YouTube JS 解算环境异常，请安装/修复 yt-dlp-ejs，并检查 node/deno 配置"
         if "yt-dlp-ejs" in normalized or "javascript runtime" in normalized:
@@ -985,23 +987,31 @@ class ProductionPipeline:
         cookies_file: Optional[Path] = None,
     ) -> tuple[bool, str]:
         """执行一次 yt-dlp 下载，返回 (是否成功, stderr)。"""
-        cmd = build_ytdlp_base_cmd() + [
-            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-            "--merge-output-format", "mp4",
-            "-o", output_path,
-            "--no-playlist",
-        ]
+        try:
+            cmd = build_ytdlp_base_cmd() + [
+                "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+                "--merge-output-format", "mp4",
+                "-o", output_path,
+                "--no-playlist",
+            ]
+        except FileNotFoundError as exc:
+            logger.error("yt-dlp 命令缺失: %s", exc)
+            return False, str(exc)
         if not has_yt_dlp_ejs():
             logger.warning("yt-dlp-ejs 未安装，YouTube 下载可能在 JS challenge 阶段失败")
         if cookies_file:
             cmd.extend(["--cookies", str(cookies_file)])
         cmd.append(source_url)
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError as exc:
+            logger.error("yt-dlp 进程启动失败: %s", exc)
+            return False, str(exc)
         _, stderr = await asyncio.wait_for(
             process.communicate(),
             timeout=Config().get("tasks", "download_timeout", default=600),
@@ -1032,9 +1042,16 @@ class ProductionPipeline:
             self.task_store.update(task)
             logger.info(f"✅ 源文件上传R2: {r2_path}")
             return True
-        else:
-            self._fail_task(task, "源文件上传R2失败", "R2_UPLOAD_FAILED")
-            return False
+
+        task.source_r2_path = ""
+        task.progress = max(task.progress, 20)
+        self.task_store.update(task)
+        logger.warning(
+            "⚠️ 源文件上传R2失败，继续使用本地源视频: task=%s local=%s",
+            task.task_id,
+            task.source_local_path,
+        )
+        return True
 
     async def _step_translate(self, task: Task, working_dir: Path) -> bool:
         """Step 3: 翻译配音（仅自管链路）"""

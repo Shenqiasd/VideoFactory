@@ -34,6 +34,15 @@ def test_classify_download_failure_dns():
     assert "DNS" in message or "网络" in message
 
 
+def test_classify_download_failure_missing_ytdlp():
+    code, message = ProductionPipeline.classify_download_failure(
+        "[Errno 2] No such file or directory: 'yt-dlp'",
+        has_cookies=False,
+    )
+    assert code == "DOWNLOAD_YTDLP_MISSING"
+    assert "yt-dlp" in message
+
+
 def test_classify_download_failure_fallback():
     code, message = ProductionPipeline.classify_download_failure(
         "some unknown yt-dlp stderr",

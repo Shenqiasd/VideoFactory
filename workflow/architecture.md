@@ -33,6 +33,8 @@
 - Groq Whisper 代理：`8866`
 - Edge-TTS 代理：`8877`
 - Worker：后台循环（心跳写入 `~/.video-factory/worker_heartbeat.json`）
+- 下载运行时：`yt-dlp` 作为 Python 依赖安装到项目 `.venv`，下载命令优先解析当前运行时目录下的 `yt-dlp`
+- 源视频上传：R2 / `rclone` 仅用于增强型回传；本地自管链路在上传失败时继续使用 `source_local_path`
 
 ## 4) 当前发布系统实现现状
 - 发布入口：

@@ -5,10 +5,37 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+import sys
+from pathlib import Path
 
 
 def has_yt_dlp_ejs() -> bool:
     return importlib.util.find_spec("yt_dlp_ejs") is not None
+
+
+def has_yt_dlp_module() -> bool:
+    return importlib.util.find_spec("yt_dlp") is not None
+
+
+def resolve_ytdlp_cmd() -> list[str]:
+    """
+    Resolve yt-dlp from the active Python runtime before falling back to PATH.
+    """
+    runtime_bin = Path(sys.executable).resolve().parent / "yt-dlp"
+    if runtime_bin.exists() and runtime_bin.is_file():
+        return [str(runtime_bin)]
+
+    system_bin = shutil.which("yt-dlp")
+    if system_bin:
+        return [system_bin]
+
+    if has_yt_dlp_module():
+        return [sys.executable, "-m", "yt_dlp"]
+
+    raise FileNotFoundError(
+        "yt-dlp is not installed in the current runtime. "
+        "Run `./.venv/bin/python -m pip install yt-dlp` or reinstall `requirements.txt`."
+    )
 
 
 def select_js_runtime() -> str | None:
@@ -33,7 +60,7 @@ def build_ytdlp_base_cmd() -> list[str]:
     explicitly enable node so YouTube JS challenge solving does not depend on
     external machine state.
     """
-    cmd = ["yt-dlp", "--ignore-config"]
+    cmd = resolve_ytdlp_cmd() + ["--ignore-config"]
 
     runtime = select_js_runtime() if has_yt_dlp_ejs() else None
     if runtime:

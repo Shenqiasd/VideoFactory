@@ -3,6 +3,6 @@
   "status": "completed",
   "task": "KlicStudio 清理 + API/前端主流程收口",
   "owner": "codex",
-  "updated_at": "2026-03-10T06:44:05Z",
-  "note": "主流程页面已对齐 translation_* 字段与持久化 progress，任务列表筛选/详情页失败阶段展示已补齐，全量 pytest 通过"
+  "updated_at": "2026-03-10T07:40:00Z",
+  "note": "主流程页面已对齐 translation_* 字段与持久化 progress，任务列表筛选/详情页失败阶段展示已补齐；已补齐 yt-dlp 依赖与运行时解析，修复运行中任务 [Errno 2] 缺失可执行文件"
 }
