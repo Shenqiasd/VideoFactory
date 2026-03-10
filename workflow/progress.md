@@ -1,6 +1,45 @@
 # 执行日志
 
+## 2026-03-10
+- 14:44 [Codex] 完成主流程核验与前端页面收口
+  - `api/routes/pages.py` 新增统一页面层活跃状态/进度辅助逻辑，任务列表、仪表盘 active 卡片与统计卡统一使用同一套状态口径
+  - `src/core/task.py` 的 `active_states()` 补入 `qc_passed`，页面、任务统计接口、系统状态统计的“活跃任务”定义保持一致
+  - `web/templates/tasks.html` 现在会读取并保持 `?status=` 查询参数；列表删除后会按当前筛选条件刷新，不再回退成“全部任务”
+  - `web/templates/task_detail.html` 补齐翻译标题、`translation_task_id` / `translation_progress`、QC 信息、语言对、当前步骤；失败任务会基于 `timeline` 回溯失败阶段并在页面中展示
+  - `web/templates/new_task.html` 移除无效 `create_cover` 选项，批量创建补齐源/目标语言选择
+  - 新增页面回归测试覆盖：active 筛选、持久化 progress 渲染、任务页查询筛选、失败详情展示
+  - 验证结果：
+    - `./.venv/bin/python -m pytest -q tests/web/test_pages_http.py tests/web/test_partials_http.py` -> `23 passed`
+    - `./.venv/bin/python -m pytest -q tests/e2e/test_frontend_playwright.py -k "dashboard_loads or create_task_api_and_tasks_page_render or new_task_page_submit_button_creates_task or tasks_page_honors_status_query_filter or task_detail_page_renders_translation_and_failed_step_context"` -> `5 passed, 3 deselected`
+    - `./.venv/bin/python -m pytest -q` -> `147 passed`
+- 14:25 [Codex] 完成翻译状态字段 API 清洁
+  - 任务模型、任务详情接口、生产状态接口把 `klic_task_id` / `klic_progress` 统一重命名为 `translation_task_id` / `translation_progress`
+  - `Task.from_dict()` 增加旧任务数据迁移，历史 `tasks.json` 中的 `klic_*` 字段会自动映射到新字段
+  - `scripts/check_status.py` 与相关测试同步更新，响应体不再暴露旧键名
+  - 验证结果：
+    - `./.venv/bin/python -m pytest -q tests/test_production_asr_router.py` -> `4 passed`
+    - `./.venv/bin/python -m pytest -q tests/web/test_api_contract.py` -> `47 passed`
+    - `./.venv/bin/python -m pytest -q` -> `142 passed`
+- 14:14 [Codex] 完成 KlicStudio 旧链路依赖清理
+  - 删除 `src/production/klicstudio_client.py` 与 `ProductionPipeline` 内部提交/轮询/下载旧实现，生产主链路只保留 `ASRRouter -> 字幕翻译/补翻 -> Volcengine TTS -> QC`
+  - `api/routes/system.py`、`web/templates/settings.html`、`api/routes/pages.py` 不再暴露 KlicStudio provider / 健康检查；旧配置会在读取时自动归一化到 `auto` / `volcengine`
+  - `scripts/start_all.sh`、`config/settings.example.yaml`、`README.md`、`workflow/architecture.md` 同步移除 KlicStudio 启动与配置说明
+  - 删除旧 Klic 测试，补充设置归一化回归；验证结果：
+    - `./.venv/bin/python -m pytest -q tests/test_production_asr_router.py` -> `4 passed`
+    - `./.venv/bin/python -m pytest -q tests/web/test_api_contract.py` -> `44 passed`
+    - `./.venv/bin/python -m pytest -q tests/web/test_pages_http.py tests/web/test_partials_http.py` -> `21 passed`
+    - `./.venv/bin/python -m pytest -q` -> `139 passed`
+
 ## 2026-03-09
+- 22:27 [Codex] 完成运行环境与页面模型收口
+  - `scripts/start_all.sh` 改为自动解析 Python 3.11（`VF_PYTHON_BIN` / `.venv/bin/python` / `python3.11`），默认 API 端口统一为 `9000`
+  - 启动脚本不再写死 KlicStudio / ffmpeg-full 本机路径；支持 `VF_KLIC_BIN` / `VF_KLIC_DIR` / `VF_FFMPEG_FULL_DIR` 和 `config/settings.yaml` 中的显式路径配置，未配置 KlicStudio 时会跳过并提示
+  - `api/routes/pages.py` 增加时间戳兼容解析与平台推导，任务列表/最近完成列表改为基于 `publish_accounts` / `products` 渲染，`TemplateResponse` 弃用警告已清零
+  - E2E 启动夹具改为与运行脚本一致地解析 Python 3.11；当前机器缺少 3.11 时会给出明确 skip 原因
+  - 验证结果：
+    - `python3 -m pytest -q tests/web/test_pages_http.py tests/web/test_partials_http.py` -> `21 passed`
+    - `python3 -m pytest -q tests/web/test_api_contract.py tests/e2e/test_publish_e2e.py` -> `39 passed, 1 skipped`
+    - `python3 -m pytest -q` -> `122 passed, 7 skipped`
 - 21:20 [Codex] 完成全仓回归并收口账号/发布前端问题
   - `api/routes/publish.py` 调整 Cookie 平台识别策略：只有明确识别为错配时才拒绝，空白/脱敏 Cookie 允许进入人工发布流
   - 修复后账号页“检测”可恢复 `active` 状态展示，发布页“标记失败 / 标记已发布 / 重试 / 取消”交互恢复

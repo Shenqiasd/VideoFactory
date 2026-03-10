@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
-from core.task import Task, TaskState, TaskStore
+from core.task import Task, TaskState, TaskStore, normalize_creation_config
 from core.runtime_settings import get_subtitle_style_defaults
 from core.subtitle_style import normalize_subtitle_style
 from production.pipeline import ProductionPipeline
@@ -50,6 +50,7 @@ class SubmitAndRunRequest(BaseModel):
     enable_tts: bool = Field(True, description="启用配音")
     embed_subtitle_type: str = Field("horizontal", description="字幕类型")
     subtitle_style: Optional[dict] = Field(None, description="字幕样式")
+    creation_config: Optional[dict] = Field(None, description="创作配置")
 
 
 # ========== 后台任务 ==========
@@ -71,7 +72,7 @@ async def run_production(request: RunProductionRequest, background_tasks: Backgr
     """
     运行生产管线（后台执行）
 
-    触发: 下载 → KlicStudio翻译 → 质检
+    触发: 下载 → 自管翻译/配音 → 质检
     """
     store = get_task_store()
     task = store.get(request.task_id)
@@ -114,6 +115,7 @@ async def submit_and_run(request: SubmitAndRunRequest, background_tasks: Backgro
             request.subtitle_style,
             defaults=get_subtitle_style_defaults(),
         ),
+        creation_config=normalize_creation_config(request.creation_config, enable_short_clips=True),
     )
 
     # 后台运行
@@ -138,8 +140,8 @@ async def get_production_status(task_id: str):
         "task_id": task.task_id,
         "state": task.state,
         "progress": task.progress,
-        "klic_task_id": task.klic_task_id,
-        "klic_progress": task.klic_progress,
+        "translation_task_id": task.translation_task_id,
+        "translation_progress": task.translation_progress,
         "translated_title": task.translated_title,
         "qc_score": task.qc_score,
         "qc_details": task.qc_details,

@@ -2,6 +2,7 @@ import json
 
 from api.routes import tasks as tasks_routes
 from api.routes import distribute as distribute_routes
+from api.routes import factory as factory_routes
 from core.task import Task, TaskState
 from distribute.scheduler import PublishJob
 from pathlib import Path
@@ -81,6 +82,30 @@ def test_json_create_respects_explicit_options(client):
     assert task.enable_short_clips is False
     assert task.enable_article is False
     assert task.embed_subtitle_type == "none"
+
+
+def test_json_create_persists_creation_config(client):
+    response = client.post(
+        "/api/tasks/",
+        json={
+            "source_url": "https://www.youtube.com/watch?v=creation_case",
+            "task_scope": "full",
+            "creation_config": {
+                "clip_count": 7,
+                "duration_min": 45,
+                "platforms": ["douyin", "bilibili"],
+                "review_mode": "manual",
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    task = tasks_routes.get_task_store().get(response.json()["task_id"])
+    assert task is not None
+    assert task.creation_config["clip_count"] == 7
+    assert task.creation_config["duration_min"] == 45
+    assert task.creation_config["platforms"] == ["douyin", "bilibili"]
+    assert task.creation_config["review_mode"] == "required"
 
 
 def test_create_alias_respects_form_toggles(client):
@@ -186,6 +211,81 @@ def test_task_detail_contains_timeline(client):
     payload = detail.json()
     assert isinstance(payload["timeline"], list)
     assert payload["timeline"]
+
+
+def test_task_detail_uses_translation_fields_instead_of_legacy_klic_fields(client):
+    created = client.post(
+        "/api/tasks/",
+        json={"source_url": "https://www.youtube.com/watch?v=translation_detail_case"},
+    )
+    task_id = created.json()["task_id"]
+
+    task = tasks_routes.get_task_store().get(task_id)
+    task.translation_task_id = "selfhosted_youtube_test"
+    task.translation_progress = 88
+    tasks_routes.get_task_store().update(task)
+
+    detail = client.get(f"/api/tasks/{task_id}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["translation_task_id"] == "selfhosted_youtube_test"
+    assert payload["translation_progress"] == 88
+    assert "klic_task_id" not in payload
+    assert "klic_progress" not in payload
+
+
+def test_task_from_dict_migrates_legacy_klic_fields():
+    migrated = Task.from_dict(
+        {
+            "task_id": "vf_migrated_case",
+            "source_url": "https://example.com/video",
+            "klic_task_id": "legacy_klic_123",
+            "klic_progress": 73,
+        }
+    )
+
+    assert migrated.translation_task_id == "legacy_klic_123"
+    assert migrated.translation_progress == 73
+
+
+def test_production_status_uses_translation_fields(client):
+    created = client.post(
+        "/api/tasks/",
+        json={"source_url": "https://www.youtube.com/watch?v=production_status_case"},
+    )
+    task_id = created.json()["task_id"]
+
+    task = tasks_routes.get_task_store().get(task_id)
+    task.translation_task_id = "selfhosted_whisper_test"
+    task.translation_progress = 64
+    tasks_routes.get_task_store().update(task)
+
+    response = client.get(f"/api/production/status/{task_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["translation_task_id"] == "selfhosted_whisper_test"
+    assert payload["translation_progress"] == 64
+    assert "klic_task_id" not in payload
+    assert "klic_progress" not in payload
+
+
+def test_factory_review_approve_endpoint_updates_creation_status(client):
+    task = tasks_routes.get_task_store().create(
+        source_url="https://www.youtube.com/watch?v=review_gate_case",
+        state=TaskState.READY_TO_PUBLISH.value,
+        creation_status={
+            "review_required": True,
+            "review_status": "pending",
+            "status": "completed",
+        },
+    )
+
+    response = client.post("/api/factory/review/approve", json={"task_id": task.task_id})
+    assert response.status_code == 200
+    assert response.json()["review_status"] == "approved"
+
+    updated = factory_routes.get_task_store().get(task.task_id)
+    assert updated.creation_status["review_status"] == "approved"
 
 
 def test_task_artifacts_list_and_download(client, tmp_path):
@@ -406,7 +506,6 @@ def test_asr_tts_settings_roundtrip(client, monkeypatch, tmp_path):
             "asr": {
                 "provider": "youtube",
                 "allow_fallback": True,
-                "allow_klicstudio_fallback": False,
                 "allow_router_with_tts": False,
                 "fallback_order": ["youtube", "whisper"],
                 "youtube_skip_download": True,
@@ -427,7 +526,7 @@ def test_asr_tts_settings_roundtrip(client, monkeypatch, tmp_path):
             },
             "tts": {
                 "provider": "volcengine",
-                "fallback_order": ["volcengine", "klicstudio"],
+                "fallback_order": ["volcengine"],
                 "volcengine": {
                     "enabled": True,
                     "appid": "app_x",
@@ -450,11 +549,18 @@ def test_asr_tts_settings_roundtrip(client, monkeypatch, tmp_path):
             "translation": {
                 "provider": "volcengine_ark",
                 "strict_json": True,
+                "local_llm": {
+                    "enabled": True,
+                    "base_url": "http://127.0.0.1:1234/v1",
+                    "api_key": "",
+                    "model": "qwen2.5-7b-instruct",
+                    "timeout": 120,
+                },
                 "volcengine_ark": {
                     "enabled": True,
                     "base_url": "https://ark.cn-beijing.volces.com/api/v3",
                     "api_key": "ark_test_key",
-                    "model": "doubao-seed-translation",
+                    "model": "doubao-seed-translation-250915",
                     "timeout": 60,
                 },
                 "llm": {
@@ -467,20 +573,27 @@ def test_asr_tts_settings_roundtrip(client, monkeypatch, tmp_path):
     payload = post_resp.json()
     assert payload["success"] is True
     assert payload["asr"]["provider"] == "youtube"
+    assert "allow_klicstudio_fallback" not in payload["asr"]
     assert payload["tts"]["provider"] == "volcengine"
+    assert payload["tts"]["fallback_order"] == ["volcengine"]
     assert payload["translation"]["provider"] == "volcengine_ark"
+    assert payload["translation"]["local_llm"]["model"] == "qwen2.5-7b-instruct"
 
     get_resp2 = client.get("/api/system/settings/asr-tts")
     assert get_resp2.status_code == 200
     assert get_resp2.json()["asr"]["provider"] == "youtube"
+    assert "allow_klicstudio_fallback" not in get_resp2.json()["asr"]
     assert get_resp2.json()["tts"]["provider"] == "volcengine"
+    assert get_resp2.json()["tts"]["fallback_order"] == ["volcengine"]
     assert get_resp2.json()["translation"]["provider"] == "volcengine_ark"
+    assert get_resp2.json()["translation"]["local_llm"]["base_url"] == "http://127.0.0.1:1234/v1"
 
     persisted = yaml.safe_load(test_config_path.read_text(encoding="utf-8"))
     assert persisted["asr"]["provider"] == "youtube"
     assert persisted["tts"]["provider"] == "volcengine"
     assert persisted["tts"]["volcengine"]["default_voice"] == "BV001_streaming"
     assert persisted["translation"]["provider"] == "volcengine_ark"
+    assert persisted["translation"]["local_llm"]["timeout"] == 120
 
 
 def test_asr_tts_settings_rejects_invalid_provider(client):
@@ -490,7 +603,6 @@ def test_asr_tts_settings_rejects_invalid_provider(client):
             "asr": {
                 "provider": "invalid_provider",
                 "allow_fallback": True,
-                "allow_klicstudio_fallback": True,
                 "allow_router_with_tts": False,
                 "fallback_order": ["youtube"],
                 "youtube_skip_download": False,
@@ -510,8 +622,8 @@ def test_asr_tts_settings_rejects_invalid_provider(client):
                 },
             },
             "tts": {
-                "provider": "klicstudio",
-                "fallback_order": ["volcengine", "klicstudio"],
+                "provider": "invalid_provider",
+                "fallback_order": ["volcengine"],
                 "volcengine": {
                     "enabled": False,
                     "app_id": "",
@@ -528,6 +640,36 @@ def test_asr_tts_settings_rejects_invalid_provider(client):
     detail = response.json()["detail"]
     assert isinstance(detail, list)
     assert any("asr.provider 非法" in str(item.get("msg", "")) for item in detail)
+
+
+def test_asr_tts_settings_get_normalizes_legacy_klic_values(client, monkeypatch, tmp_path):
+    from core.config import Config
+    import yaml
+
+    src_config_path = Path(__file__).resolve().parents[2] / "config" / "settings.yaml"
+    test_config_path = tmp_path / "settings.yaml"
+    config_data = yaml.safe_load(src_config_path.read_text(encoding="utf-8"))
+    config_data.setdefault("asr", {})
+    config_data["asr"]["provider"] = "klicstudio"
+    config_data["asr"]["allow_klicstudio_fallback"] = True
+    config_data["asr"]["fallback_order"] = ["youtube", "klicstudio", "whisper"]
+    config_data.setdefault("tts", {})
+    config_data["tts"]["provider"] = "klicstudio"
+    config_data["tts"]["fallback_order"] = ["volcengine", "klicstudio"]
+    test_config_path.write_text(yaml.safe_dump(config_data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    monkeypatch.setenv("VF_CONFIG", str(test_config_path))
+    Config.reset()
+
+    response = client.get("/api/system/settings/asr-tts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["asr"]["provider"] == "auto"
+    assert "allow_klicstudio_fallback" not in payload["asr"]
+    assert payload["asr"]["fallback_order"] == ["youtube", "whisper"]
+    assert payload["tts"]["provider"] == "volcengine"
+    assert payload["tts"]["fallback_order"] == ["volcengine"]
 
 
 def test_system_tts_voices_endpoint(client):
@@ -578,7 +720,7 @@ def test_system_translation_test_endpoint_accepts_runtime_overrides(client, monk
             "enabled": True,
             "base_url": "https://ark.cn-beijing.volces.com/api/v3",
             "api_key": "ark_runtime_key",
-            "model": "doubao-seed-translation",
+            "model": "doubao-seed-translation-250915",
             "timeout": 30,
         },
     )
@@ -587,6 +729,51 @@ def test_system_translation_test_endpoint_accepts_runtime_overrides(client, monk
     assert payload["success"] is True
     assert payload["provider"] == "volcengine_ark"
     assert payload["result"] == "Hello runtime-override"
+
+
+def test_system_translation_test_endpoint_supports_local_llm_without_api_key(client, monkeypatch):
+    async def _fake_translate(self, *, text, source_lang="en", target_lang="zh-CN"):
+        return f"{text}-local"
+
+    monkeypatch.setattr("api.routes.system.LocalLLMTranslator.translate_text", _fake_translate)
+
+    response = client.post(
+        "/api/system/test/translation",
+        json={
+            "provider": "local_llm",
+            "text": "Hello local",
+            "source_lang": "en",
+            "target_lang": "zh-CN",
+            "enabled": True,
+            "base_url": "http://127.0.0.1:1234/v1",
+            "model": "qwen2.5-7b-instruct",
+            "timeout": 45,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["provider"] == "local_llm"
+    assert payload["base_url"] == "http://127.0.0.1:1234/v1"
+    assert payload["model"] == "qwen2.5-7b-instruct"
+    assert payload["result"] == "Hello local-local"
+
+
+def test_system_translation_test_endpoint_rejects_incomplete_local_llm_config(client):
+    response = client.post(
+        "/api/system/test/translation",
+        json={
+            "provider": "local_llm",
+            "text": "Hello local",
+            "source_lang": "en",
+            "target_lang": "zh-CN",
+            "enabled": True,
+            "base_url": "http://127.0.0.1:1234/v1",
+            "model": "",
+        },
+    )
+    assert response.status_code == 400
+    assert "本地翻译模型未配置完整或未启用" in response.json()["detail"]
 
 
 def test_system_tts_test_endpoint(client, monkeypatch, tmp_path):

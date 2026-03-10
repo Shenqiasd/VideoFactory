@@ -12,6 +12,8 @@ from core.task import Task, TaskState, TaskStore, TaskProduct
 from core.storage import StorageManager, LocalStorage
 from core.notification import NotificationManager, NotifyLevel
 from core.config import Config
+from creation.models import CreationResult
+from creation.pipeline import CreationPipeline
 from factory.long_video import LongVideoProcessor
 from factory.short_clips import ShortClipExtractor
 from factory.cover import CoverGenerator
@@ -47,6 +49,10 @@ class FactoryPipeline:
         # 子模块
         self.long_video = LongVideoProcessor()
         self.short_clips = ShortClipExtractor()
+        self.creation = CreationPipeline(
+            task_store=self.task_store,
+            fallback_short_clips=self.short_clips,
+        )
         self.cover = CoverGenerator()
         self.metadata = MetadataGenerator()
         self.article = ArticleGenerator()
@@ -109,7 +115,7 @@ class FactoryPipeline:
             if scope == "subtitle_only":
                 logger.info("🎞️ subtitle_only 模式：仅执行字幕压制长视频")
                 long_video_path = await self._process_long_video(task, video_path, subtitle_path, output_dir)
-                clip_paths = []
+                clip_result = {"variants": [], "segments": [], "masters": [], "stats": {}, "review_status": "approved"}
                 cover_paths = {}
                 metadata_map = {}
                 article_map = {}
@@ -134,7 +140,7 @@ class FactoryPipeline:
                 )
 
                 # 处理结果
-                long_video_path, clip_paths, cover_paths, metadata_map, article_map = results
+                long_video_path, clip_result, cover_paths, metadata_map, article_map = results
 
                 # 检查是否有异常
                 errors = []
@@ -147,7 +153,7 @@ class FactoryPipeline:
                     logger.warning(f"⚠️ 部分加工模块出错: {errors}")
 
             # 记录产出物
-            await self._record_products(task, long_video_path, clip_paths, cover_paths, metadata_map)
+            await self._record_products(task, long_video_path, clip_result, cover_paths, metadata_map)
 
             # 上传产出物到R2
             task.transition(TaskState.UPLOADING_PRODUCTS)
@@ -158,12 +164,18 @@ class FactoryPipeline:
 
             # 完成加工
             task.transition(TaskState.READY_TO_PUBLISH)
-            task.progress = 90
+            review_required = bool((task.creation_status or {}).get("review_required"))
+            review_status = str((task.creation_state or {}).get("review_status", "approved"))
+            task.progress = 88 if review_required and review_status != "approved" else 90
             self.task_store.update(task)
 
             await self.notifier.notify(
-                "加工完成",
-                f"产出物: {len(task.products)} 个\n准备发布",
+                "加工完成" if not (review_required and review_status != "approved") else "加工完成，等待审核",
+                (
+                    f"产出物: {len(task.products)} 个\n准备发布"
+                    if not (review_required and review_status != "approved")
+                    else f"产出物: {len(task.products)} 个\n审核状态: {review_status}"
+                ),
                 NotifyLevel.SUCCESS,
                 task.task_id,
             )
@@ -199,24 +211,46 @@ class FactoryPipeline:
         """短视频切片"""
         if not task.enable_short_clips:
             logger.info("⏭️ 跳过短视频切片（未启用）")
-            return []
+            task.update_creation_state(
+                enabled=False,
+                status="skipped",
+                stage="skipped",
+                review_status="not_required",
+                selected_segments=[],
+                segments_total=0,
+                segments_completed=0,
+                variants_total=0,
+                variants_completed=0,
+            )
+            self.task_store.update(task)
+            return CreationResult()
 
         try:
             clips_dir = str(output_dir / "short_clips")
-            clips = await self.short_clips.process(
+            creation_result = await self.creation.process(
+                task,
                 video_path=video_path,
                 subtitle_path=subtitle_path,
                 output_dir=clips_dir,
-                max_clips=5,
-                min_duration=30,
-                max_duration=90,
-                vertical=True,
             )
-            logger.info(f"✅ 短视频切片: {len(clips)} 个")
-            return clips
+            logger.info(
+                "✅ 创作短视频: segments=%s variants=%s fallback=%s",
+                len(creation_result.segments),
+                len(creation_result.variants),
+                creation_result.used_fallback,
+            )
+            return creation_result
         except Exception as e:
             logger.error(f"短视频切片失败: {e}")
-            return []
+            task.update_creation_state(
+                enabled=True,
+                status="failed",
+                stage="failed",
+                review_status="rejected",
+                warnings=list((task.creation_state or {}).get("warnings", [])) + [str(e)],
+            )
+            self.task_store.update(task)
+            return CreationResult(warnings=[str(e)])
 
     async def _process_covers(self, task: Task, video_path: str, output_dir: Path):
         """封面生成"""
@@ -273,7 +307,7 @@ class FactoryPipeline:
         self,
         task: Task,
         long_video_path,
-        clip_paths,
+        clip_result,
         cover_paths,
         metadata_map,
     ):
@@ -291,14 +325,44 @@ class FactoryPipeline:
             task.add_product(product)
 
         # 短视频
-        if clip_paths and not isinstance(clip_paths, Exception):
-            for i, clip_path in enumerate(clip_paths):
+        if isinstance(clip_result, CreationResult):
+            for i, variant in enumerate(clip_result.variants):
+                variant_metadata = variant.metadata if isinstance(variant.metadata, dict) else {}
+                platform_metadata = metadata_map.get(variant.platform, {}) if isinstance(metadata_map, dict) else {}
                 product = TaskProduct(
                     type="short_clip",
-                    platform="douyin",
-                    local_path=clip_path,
-                    title=f"{task.translated_title} #{i+1}",
-                    metadata=metadata_map.get("douyin", {}) if isinstance(metadata_map, dict) else {},
+                    platform=variant.platform,
+                    local_path=variant.local_path,
+                    title=variant.title or f"{task.translated_title} #{i+1}",
+                    description=variant.description,
+                    metadata={
+                        **platform_metadata,
+                        **variant_metadata,
+                        "segment_id": variant.segment_id,
+                        "review_status": variant_metadata.get(
+                            "review_status",
+                            (task.creation_state or {}).get("review_status", "pending"),
+                        ),
+                    },
+                )
+                task.add_product(product)
+        elif clip_result and not isinstance(clip_result, Exception):
+            variants = clip_result.get("variants", []) if isinstance(clip_result, dict) else []
+            for i, variant in enumerate(variants):
+                product = TaskProduct(
+                    type="short_clip",
+                    platform=variant.get("platform", "douyin"),
+                    local_path=variant.get("local_path", ""),
+                    title=variant.get("title", f"{task.translated_title} #{i+1}"),
+                    metadata={
+                        **(metadata_map.get(variant.get("platform", ""), {}) if isinstance(metadata_map, dict) else {}),
+                        **(variant.get("metadata", {}) if isinstance(variant, dict) else {}),
+                        "segment_id": variant.get("segment_id", f"clip_{i+1:02d}"),
+                        "review_status": variant.get(
+                            "review_status",
+                            (task.creation_state or {}).get("review_status", "pending"),
+                        ),
+                    },
                 )
                 task.add_product(product)
 

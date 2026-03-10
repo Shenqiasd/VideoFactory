@@ -3,9 +3,7 @@
 Edge-TTS 代理服务
 将 OpenAI TTS API 格式的请求转换为 Python edge-tts 调用
 
-解决KlicStudio自带的edge-tts二进制是arm64无法在Intel Mac上运行的问题。
-通过设置 KlicStudio 的 tts.provider = "openai" 并将 base_url 指向本代理，
-实现 edge-tts 的功能。
+用于兼容需要 OpenAI TTS API 的本地工具或调试场景。
 
 用法: python3.11 scripts/edge_tts_proxy.py
 服务启动在: http://127.0.0.1:8877
@@ -54,7 +52,7 @@ async def create_speech(request: Request):
         return JSONResponse(status_code=400, content={"error": "Invalid JSON"})
 
     input_text = body.get("input", "")
-    voice = body.get("voice", "") or "alloy"  # KlicStudio可能传空字符串
+    voice = body.get("voice", "") or "alloy"  # 某些客户端会传空字符串
     model = body.get("model", "tts-1")
     response_format = body.get("response_format", "mp3")
     speed = body.get("speed", 1.0)

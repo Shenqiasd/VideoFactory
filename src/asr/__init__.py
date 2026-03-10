@@ -15,7 +15,7 @@ from .youtube_subtitle import YouTubeSubtitleASR
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_ASR_PROVIDERS = ("auto", "youtube", "volcengine", "whisper", "klicstudio")
+SUPPORTED_ASR_PROVIDERS = ("auto", "youtube", "volcengine", "whisper")
 
 
 class ASRRouter:
@@ -34,7 +34,6 @@ class ASRRouter:
         provider = str(asr_cfg.get("provider", "auto")).strip().lower()
         self.provider = provider if provider in SUPPORTED_ASR_PROVIDERS else "auto"
         self.allow_fallback = bool(asr_cfg.get("allow_fallback", True))
-        self.allow_klicstudio_fallback = bool(asr_cfg.get("allow_klicstudio_fallback", False))
         self.youtube_skip_download = bool(asr_cfg.get("youtube_skip_download", False))
 
         fallback_order = asr_cfg.get("fallback_order", ["youtube", "volcengine", "whisper"])

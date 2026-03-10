@@ -70,6 +70,23 @@ def _validate_publish_accounts(account_map: dict[str, str], platforms: List[str]
     return normalized
 
 
+def _publish_targets_pending_creation_review(task, platforms: List[str]) -> bool:
+    creation_status = getattr(task, "creation_status", {}) or {}
+    if not creation_status.get("review_required") or creation_status.get("review_status") == "approved":
+        return False
+
+    requested_platforms = set(platforms or [])
+    if not requested_platforms:
+        return False
+
+    for product in getattr(task, "products", []) or []:
+        if not isinstance(product, dict) or product.get("type") != "short_clip":
+            continue
+        if product.get("platform") in requested_platforms:
+            return True
+    return False
+
+
 class ReplayRequest(BaseModel):
     """重放失败发布任务"""
     task_id: str
@@ -108,6 +125,12 @@ async def publish(request: PublishRequest, background_tasks: BackgroundTasks):
         raise HTTPException(
             status_code=400,
             detail={"code": "TASK_NOT_READY", "message": f"任务未就绪，当前状态: {task.state}"},
+        )
+
+    if _publish_targets_pending_creation_review(task, request.platforms):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "CREATION_REVIEW_PENDING", "message": "创作产物待审核，暂不能发布"},
         )
 
     if not task.products:

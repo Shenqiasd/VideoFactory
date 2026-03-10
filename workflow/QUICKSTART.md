@@ -60,7 +60,7 @@ cat workflow/steps/step2_design.md
 
 # 2. 按设计实现代码
 # 3. 每完成一个文件，运行测试
-python3.11 -m pytest -q tests/test_xxx.py
+./.venv/bin/python -m pytest -q tests/test_xxx.py
 
 # 4. 记录进度
 echo "- $(date +%H:%M) [Codex] 完成 src/xxx.py" >> workflow/progress.md
@@ -86,7 +86,7 @@ jq '.status = "completed" | .owner = "claude"' \
 ```bash
 # Claude 执行
 # 1. 运行所有测试
-python3.11 -m pytest -q
+./.venv/bin/python -m pytest -q
 
 # 2. 服务健康检查（如果改动了服务）
 bash scripts/start_all.sh restart

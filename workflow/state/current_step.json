@@ -1,8 +1,8 @@
 {
-  "step": "step5_release",
+  "step": "step3_implementation",
   "status": "completed",
-  "task": "发布管理 + 存储管理 + 自管翻译链路整合提交",
+  "task": "KlicStudio 清理 + API/前端主流程收口",
   "owner": "codex",
-  "updated_at": "2026-03-09T13:25:00Z",
-  "note": "全量 pytest 通过，文档已同步，待推送到 GitHub"
+  "updated_at": "2026-03-10T06:44:05Z",
+  "note": "主流程页面已对齐 translation_* 字段与持久化 progress，任务列表筛选/详情页失败阶段展示已补齐，全量 pytest 通过"
 }

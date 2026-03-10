@@ -8,7 +8,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from core.storage import StorageManager, LocalStorage
-from production.klicstudio_client import KlicStudioClient
 
 
 async def test_r2_storage():
@@ -66,26 +65,6 @@ async def test_local_storage():
     print("✅ 本地存储测试完成")
 
 
-async def test_klicstudio():
-    """测试KlicStudio连接"""
-    print("\n=== 测试 KlicStudio ===")
-
-    client = KlicStudioClient()
-
-    # 测试连接
-    config = await client.get_config()
-
-    if config:
-        print(f"✅ KlicStudio连接成功")
-        print(f"   LLM Model: {config.get('llm', {}).get('model')}")
-        print(f"   TTS Provider: {config.get('tts', {}).get('provider')}")
-        print(f"   Transcribe Provider: {config.get('transcribe', {}).get('provider')}")
-    else:
-        print("❌ KlicStudio连接失败")
-
-    await client.close()
-
-
 async def main():
     print("=" * 50)
     print("video-factory 基础设施测试")
@@ -94,9 +73,8 @@ async def main():
     # 测试存储
     await test_r2_storage()
     await test_local_storage()
-
-    # 测试KlicStudio
-    await test_klicstudio()
+    print("\n=== 自管翻译链路提示 ===")
+    print("通过 Web 设置页或 /api/system/test/translation、/api/system/test/tts 检查翻译与配音配置。")
 
     print("\n" + "=" * 50)
     print("✅ 所有测试完成！")

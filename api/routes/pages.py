@@ -1,10 +1,9 @@
 """
 Web pages and HTMX partials routes
 """
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -24,19 +23,22 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
 
 
+def render_template(request: Request, template_name: str, **context):
+    """统一新版本 TemplateResponse 调用顺序。"""
+    return templates.TemplateResponse(request, template_name, context)
+
+
 def _service_check_urls(request: Request) -> List[tuple[str, str]]:
     """
     返回服务健康检查地址（动态端口，避免硬编码导致误判离线）。
     """
     cfg = Config()
     api_base = str(request.base_url).rstrip("/")
-    klic_base = cfg.get("klicstudio", "base_url", default="http://127.0.0.1:8888").rstrip("/")
     whisper_base = cfg.get("services", "whisper_proxy_url", default="http://127.0.0.1:8866").rstrip("/")
     tts_base = cfg.get("services", "tts_proxy_url", default="http://127.0.0.1:8877").rstrip("/")
 
     return [
         ("API", f"{api_base}/api/health"),
-        ("Klic", f"{klic_base}/api/capability/subtitleTask?taskId=test"),
         ("Whisper", f"{whisper_base}/health"),
         ("TTS", f"{tts_base}/health"),
     ]
@@ -62,6 +64,77 @@ def format_duration(seconds: int) -> str:
         hours = seconds // 3600
         minutes = (seconds % 3600) // 60
         return f"{hours}小时{minutes}分钟"
+
+
+def parse_timestamp(value) -> Optional[float]:
+    """兼容 float 时间戳、数字字符串和 ISO 时间。"""
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if float(value) > 0 else None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            parsed = float(raw)
+            return parsed if parsed > 0 else None
+        except ValueError:
+            pass
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def format_timestamp(value, fmt: str = "%Y-%m-%d %H:%M", fallback: str = "未知") -> str:
+    ts = parse_timestamp(value)
+    if ts is None:
+        return fallback
+    return datetime.fromtimestamp(ts).strftime(fmt)
+
+
+def duration_between(start_value, end_value) -> Optional[int]:
+    start_ts = parse_timestamp(start_value)
+    end_ts = parse_timestamp(end_value)
+    if start_ts is None or end_ts is None:
+        return None
+    return max(0, int(end_ts - start_ts))
+
+
+def get_task_products(task: Dict) -> List[Dict]:
+    products = task.get("products")
+    if isinstance(products, list):
+        return products
+    legacy_products = task.get("factory_products")
+    if isinstance(legacy_products, list):
+        return legacy_products
+    return []
+
+
+def get_task_platforms(task: Dict) -> List[str]:
+    platforms: List[str] = []
+
+    def _append(platform: Optional[str]):
+        if platform and platform != "all" and platform not in platforms:
+            platforms.append(platform)
+
+    publish_accounts = task.get("publish_accounts") or {}
+    for platform in publish_accounts.keys():
+        _append(platform)
+
+    for platform in task.get("target_platforms", []) or []:
+        _append(platform)
+
+    for product in get_task_products(task):
+        _append(product.get("platform"))
+
+    return platforms
+
+
+def get_task_title(task: Dict) -> str:
+    return task.get("source_title") or task.get("original_title") or task.get("source_url", "未命名任务")
 
 
 def get_status_display(state: str) -> Dict[str, str]:
@@ -127,6 +200,35 @@ def calculate_task_progress(task: Dict) -> int:
     return progress_map.get(task.get("state"), 0)
 
 
+_UI_ACTIVE_STATES = {
+    TaskState.QUEUED,
+    TaskState.DOWNLOADING,
+    TaskState.DOWNLOADED,
+    TaskState.UPLOADING_SOURCE,
+    TaskState.TRANSLATING,
+    TaskState.QC_CHECKING,
+    TaskState.QC_PASSED,
+    TaskState.PROCESSING,
+    TaskState.UPLOADING_PRODUCTS,
+    TaskState.PUBLISHING,
+}
+
+
+def is_task_active_for_ui(task: Dict[str, Any]) -> bool:
+    """统一页面层“活跃任务”口径。"""
+    return task.get("state") in _UI_ACTIVE_STATES
+
+
+def get_task_progress(task: Dict[str, Any]) -> int:
+    """优先使用任务持久化进度，缺失时再按状态兜底推导。"""
+    raw_progress = task.get("progress")
+    if isinstance(raw_progress, (int, float)):
+        normalized = max(0, min(100, int(raw_progress)))
+        if normalized > 0 or task.get("state") in [TaskState.QUEUED, TaskState.FAILED]:
+            return normalized
+    return calculate_task_progress(task)
+
+
 # scope → 显示标签（full 不显示标签）
 _SCOPE_DISPLAY_LABELS = {
     "subtitle_only": "仅字幕",
@@ -147,28 +249,25 @@ def get_scope_label(task: Dict) -> str:
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """Dashboard home page"""
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return render_template(request, "dashboard.html")
 
 
 @router.get("/tasks/new", response_class=HTMLResponse)
 async def new_task_page(request: Request):
     """New task creation page"""
-    return templates.TemplateResponse("new_task.html", {"request": request})
+    return render_template(request, "new_task.html")
 
 
 @router.get("/tasks", response_class=HTMLResponse)
 async def tasks_list_page(request: Request):
     """Task list page"""
-    return templates.TemplateResponse("tasks.html", {"request": request})
+    return render_template(request, "tasks.html")
 
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 async def task_detail_page(request: Request, task_id: str):
     """Task detail page"""
-    return templates.TemplateResponse(
-        "task_detail.html",
-        {"request": request, "task_id": task_id}
-    )
+    return render_template(request, "task_detail.html", task_id=task_id)
 
 
 @router.get("/tasks/{task_id}/artifacts")
@@ -186,25 +285,25 @@ async def task_artifact_download_alias(task_id: str, artifact_id: str):
 @router.get("/publish", response_class=HTMLResponse)
 async def publish_page(request: Request):
     """Publish management page"""
-    return templates.TemplateResponse("publish.html", {"request": request})
+    return render_template(request, "publish.html")
 
 
 @router.get("/accounts", response_class=HTMLResponse)
 async def accounts_page(request: Request):
     """Account management page"""
-    return templates.TemplateResponse("accounts.html", {"request": request})
+    return render_template(request, "accounts.html")
 
 
 @router.get("/storage", response_class=HTMLResponse)
 async def storage_page(request: Request):
     """Storage management page"""
-    return templates.TemplateResponse("storage.html", {"request": request})
+    return render_template(request, "storage.html")
 
 
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     """System settings page"""
-    return templates.TemplateResponse("settings.html", {"request": request})
+    return render_template(request, "settings.html")
 
 
 # ============================================================================
@@ -218,11 +317,7 @@ async def stats_cards_partial(request: Request):
     all_tasks = [t.to_dict() for t in task_store.list_all()]
 
     total_tasks = len(all_tasks)
-    active_tasks = len([t for t in all_tasks if t["state"] in [
-        TaskState.DOWNLOADING, TaskState.TRANSLATING, TaskState.PROCESSING,
-        TaskState.PUBLISHING, TaskState.QC_CHECKING, TaskState.UPLOADING_SOURCE,
-        TaskState.UPLOADING_PRODUCTS
-    ]])
+    active_tasks = len([t for t in all_tasks if is_task_active_for_ui(t)])
     completed_tasks = len([t for t in all_tasks if t["state"] == TaskState.COMPLETED])
     pending_publish = len([t for t in all_tasks if t["state"] in [
         TaskState.READY_TO_PUBLISH, TaskState.QC_PASSED
@@ -238,10 +333,7 @@ async def stats_cards_partial(request: Request):
         "success_rate": success_rate,
     }
 
-    return templates.TemplateResponse(
-        "partials/stats_cards.html",
-        {"request": request, "stats": stats}
-    )
+    return render_template(request, "partials/stats_cards.html", stats=stats)
 
 
 @router.get("/web/partials/active_tasks", response_class=HTMLResponse)
@@ -251,13 +343,7 @@ async def active_tasks_partial(request: Request):
     all_tasks = [t.to_dict() for t in task_store.list_all()]
 
     # Filter active tasks
-    active_states = [
-        TaskState.QUEUED, TaskState.DOWNLOADING, TaskState.TRANSLATING,
-        TaskState.PROCESSING, TaskState.PUBLISHING, TaskState.QC_CHECKING,
-        TaskState.UPLOADING_SOURCE, TaskState.UPLOADING_PRODUCTS,
-        TaskState.DOWNLOADED, TaskState.QC_PASSED
-    ]
-    active_tasks = [t for t in all_tasks if t["state"] in active_states]
+    active_tasks = [t for t in all_tasks if is_task_active_for_ui(t)]
 
     # Sort by created_at descending, limit to 5 for dashboard
     active_tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -269,19 +355,17 @@ async def active_tasks_partial(request: Request):
         task["status_text"] = status["text"]
         task["status_color"] = status["color"]
         task["status_bg"] = status["bg"]
-        task["progress"] = calculate_task_progress(task)
+        task["progress"] = get_task_progress(task)
         task["current_step"] = status["text"]
         task["can_pause"] = task["state"] in [TaskState.TRANSLATING, TaskState.PROCESSING]
         task["can_cancel"] = task["state"] not in [TaskState.COMPLETED, TaskState.FAILED, TaskState.PARTIAL_SUCCESS]
         task["scope_label"] = get_scope_label(task)
 
-    return templates.TemplateResponse(
+    return render_template(
+        request,
         "partials/active_tasks.html",
-        {
-            "request": request,
-            "tasks": display_tasks,
-            "total_active": len(active_tasks)
-        }
+        tasks=display_tasks,
+        total_active=len(active_tasks),
     )
 
 
@@ -349,7 +433,6 @@ async def service_status_detail_partial(request: Request):
     checks = _service_check_urls(request)
     name_map = {
         "API": "video-factory API",
-        "Klic": "KlicStudio",
         "Whisper": "Groq Whisper 代理",
         "TTS": "Edge-TTS 代理",
     }
@@ -385,13 +468,11 @@ async def service_status_detail_partial(request: Request):
 
     last_check_time = datetime.now().strftime("%H:%M:%S")
 
-    return templates.TemplateResponse(
+    return render_template(
+        request,
         "partials/service_status_detail.html",
-        {
-            "request": request,
-            "services": services,
-            "last_check_time": last_check_time
-        }
+        services=services,
+        last_check_time=last_check_time,
     )
 
 
@@ -447,13 +528,11 @@ async def storage_overview_partial(request: Request):
         "file_count": local_files
     }
 
-    return templates.TemplateResponse(
+    return render_template(
+        request,
         "partials/storage_overview.html",
-        {
-            "request": request,
-            "r2": r2_data,
-            "local": local_data
-        }
+        r2=r2_data,
+        local=local_data,
     )
 
 
@@ -462,22 +541,18 @@ async def task_list_partial(request: Request, status: str = "all", platform: str
     """Task list HTMX partial"""
     task_store = TaskStore()
     all_tasks = [t.to_dict() for t in task_store.list_all()]
+    now_ts = datetime.now().timestamp()
 
     # Filter by status
     if status != "all":
         if status == "active":
-            active_states = [
-                TaskState.QUEUED, TaskState.DOWNLOADING, TaskState.TRANSLATING,
-                TaskState.PROCESSING, TaskState.PUBLISHING, TaskState.QC_CHECKING,
-                TaskState.UPLOADING_SOURCE, TaskState.UPLOADING_PRODUCTS
-            ]
-            all_tasks = [t for t in all_tasks if t["state"] in active_states]
+            all_tasks = [t for t in all_tasks if is_task_active_for_ui(t)]
         else:
             all_tasks = [t for t in all_tasks if t["state"] == status]
 
     # Filter by platform
     if platform != "all":
-        all_tasks = [t for t in all_tasks if platform in t.get("target_platforms", [])]
+        all_tasks = [t for t in all_tasks if platform in get_task_platforms(t)]
 
     # Enrich task data
     for task in all_tasks:
@@ -485,30 +560,25 @@ async def task_list_partial(request: Request, status: str = "all", platform: str
         task["status_text"] = status_info["text"]
         task["status_color"] = status_info["color"]
         task["status_bg"] = status_info["bg"]
-        task["progress"] = calculate_task_progress(task)
+        task["progress"] = get_task_progress(task)
         task["current_step"] = status_info["text"]
-        task["is_active"] = task["state"] in [
-            TaskState.DOWNLOADING, TaskState.TRANSLATING, TaskState.PROCESSING,
-            TaskState.PUBLISHING, TaskState.QC_CHECKING,
-            TaskState.UPLOADING_SOURCE, TaskState.UPLOADING_PRODUCTS,
-            TaskState.QC_CHECKING, TaskState.QUEUED
-        ]
+        task["is_active"] = is_task_active_for_ui(task)
         task["can_retry"] = task["state"] == TaskState.FAILED
         task["can_cancel"] = task["state"] not in [TaskState.COMPLETED, TaskState.FAILED, TaskState.PARTIAL_SUCCESS]
         task["initial"] = task.get("source_title", "V")[0].upper() if task.get("source_title") else "V"
-        task["title"] = task.get("source_title") or task.get("source_url", "未命名任务")
-        task["platforms"] = task.get("target_platforms", [])
-        task["elapsed_time"] = "计算中..."
+        task["title"] = get_task_title(task)
+        task["platforms"] = get_task_platforms(task)
+        task["created_at_display"] = format_timestamp(task.get("created_at"))
+        duration = duration_between(task.get("created_at"), now_ts)
+        task["elapsed_time"] = format_duration(duration) if duration is not None else "-"
         task["scope_label"] = get_scope_label(task)
 
-    return templates.TemplateResponse(
+    return render_template(
+        request,
         "partials/task_list.html",
-        {
-            "request": request,
-            "tasks": all_tasks,
-            "total_pages": 1,
-            "current_page": 1
-        }
+        tasks=all_tasks,
+        total_pages=1,
+        current_page=1,
     )
 
 
@@ -522,51 +592,26 @@ async def recent_completed_partial(request: Request):
     completed_tasks = [t for t in all_tasks if t["state"] == TaskState.COMPLETED]
 
     # Sort by completed_at descending, limit to 10
-    completed_tasks.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+    completed_tasks.sort(key=lambda x: parse_timestamp(x.get("updated_at")) or 0, reverse=True)
     recent_tasks = completed_tasks[:10]
 
     # Enrich task data
     for task in recent_tasks:
-        # Format timestamps
-        if "updated_at" in task:
-            try:
-                updated = datetime.fromisoformat(task["updated_at"])
-                task["completed_at"] = updated.strftime("%Y-%m-%d %H:%M")
-            except:
-                task["completed_at"] = "未知"
-        else:
-            task["completed_at"] = "未知"
-
-        # Calculate duration
-        if "created_at" in task and "updated_at" in task:
-            try:
-                created = datetime.fromisoformat(task["created_at"])
-                updated = datetime.fromisoformat(task["updated_at"])
-                duration = int((updated - created).total_seconds())
-                task["duration"] = format_duration(duration)
-            except:
-                task["duration"] = "未知"
-        else:
-            task["duration"] = "未知"
-
-        # Platforms
-        task["platforms"] = task.get("target_platforms", ["未设置"])
+        task["completed_at"] = format_timestamp(task.get("updated_at"))
+        duration = duration_between(task.get("created_at"), task.get("updated_at"))
+        task["duration"] = format_duration(duration) if duration is not None else "未知"
+        task["platforms"] = get_task_platforms(task) or ["未设置"]
+        task["display_title"] = get_task_title(task)
 
         # Product info
-        products = task.get("factory_products", [])
+        products = get_task_products(task)
         task["has_long_video"] = any(p.get("type") == "long_video" for p in products)
         task["has_clips"] = any(p.get("type") == "short_clip" for p in products)
         task["clips_count"] = len([p for p in products if p.get("type") == "short_clip"])
         task["has_article"] = any(p.get("type") == "article" for p in products)
         task["published"] = task.get("state") == TaskState.COMPLETED and task.get("published", False)
 
-    return templates.TemplateResponse(
-        "partials/recent_completed.html",
-        {
-            "request": request,
-            "tasks": recent_tasks
-        }
-    )
+    return render_template(request, "partials/recent_completed.html", tasks=recent_tasks)
 
 
 @router.get("/web/partials/publish_stats", response_class=HTMLResponse)
@@ -584,10 +629,7 @@ async def publish_stats_partial(request: Request):
         "failed": status_count.get("failed", 0) + status_count.get("cancelled", 0),
     }
 
-    return templates.TemplateResponse(
-        "partials/publish_stats.html",
-        {"request": request, "stats": stats}
-    )
+    return render_template(request, "partials/publish_stats.html", stats=stats)
 
 
 @router.get("/web/partials/publish_queue", response_class=HTMLResponse)
@@ -662,10 +704,7 @@ async def publish_queue_partial(request: Request, platform: str = "all"):
         else:
             job["scheduled_time"] = "立即"
 
-    return templates.TemplateResponse(
-        "partials/publish_queue.html",
-        {"request": request, "jobs": all_jobs}
-    )
+    return render_template(request, "partials/publish_queue.html", jobs=all_jobs)
 
 
 @router.get("/web/partials/publish_events", response_class=HTMLResponse)
@@ -677,15 +716,12 @@ async def publish_events_partial(request: Request, task_id: str = "", limit: int
 
     for event in events:
         if event.get("created_at"):
-            try:
-                created = datetime.fromisoformat(event["created_at"])
-                event["created_at_display"] = created.strftime("%m-%d %H:%M:%S")
-            except Exception:
-                event["created_at_display"] = event["created_at"]
+            event["created_at_display"] = format_timestamp(
+                event["created_at"],
+                fmt="%m-%d %H:%M:%S",
+                fallback=str(event["created_at"]),
+            )
         else:
             event["created_at_display"] = "-"
 
-    return templates.TemplateResponse(
-        "partials/publish_events.html",
-        {"request": request, "events": events, "task_id": task_id},
-    )
+    return render_template(request, "partials/publish_events.html", events=events, task_id=task_id)

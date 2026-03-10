@@ -1,9 +1,9 @@
 {
   "project": "video-factory",
-  "repo_root": "/Users/enesource/Projects/video-factory",
+  "repo_root": "/Users/pete/Project/Git/VideoFactory",
   "api_port": 9000,
   "worker_entry": "workers/main.py",
   "service_script": "scripts/start_all.sh",
-  "test_command": "/usr/local/bin/python3.11 -m pytest -q",
-  "last_baseline_date": "2026-03-03"
+  "test_command": "./.venv/bin/python -m pytest -q",
+  "last_baseline_date": "2026-03-09"
 }

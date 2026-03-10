@@ -28,7 +28,8 @@ cd video-factory
 
 ### 2. 安装依赖
 ```bash
-pip install -r requirements.txt
+python3.11 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
 ```
 
 ### 3. 配置
@@ -39,6 +40,11 @@ cp config/settings.example.yaml config/settings.yaml
 # 编辑配置文件，填入你的API密钥
 vim config/settings.yaml
 ```
+
+可选本机运行配置：
+- `VF_PYTHON_BIN`：显式指定 Python 3.11 解释器
+- `VF_FFMPEG_PATH`：指定 ffmpeg 路径
+- 也可以在 `config/settings.yaml` 中填写 `ffmpeg.path`、`ffprobe_path`
 
 ### 4. 启动服务
 ```bash
@@ -57,8 +63,8 @@ video-factory/
 ├── src/                    # 核心业务逻辑
 │   ├── core/              # 任务状态机、存储、配置
 │   ├── asr/               # ASR路由（YouTube/Whisper/火山引擎）
-│   ├── tts/               # TTS路由（KlicStudio/火山引擎）
-│   ├── production/        # 翻译配音流程
+│   ├── tts/               # TTS路由（火山引擎）
+│   ├── production/        # 自管翻译配音流程
 │   ├── factory/           # 二次创作（切片、封面、元数据）
 │   └── distribute/        # 多平台发布调度
 ├── api/                   # FastAPI服务
@@ -109,13 +115,13 @@ video-factory/
 
 ```bash
 # 运行所有测试
-pytest
+./.venv/bin/python -m pytest -q
 
 # 运行特定测试
-pytest tests/test_asr_router.py
+./.venv/bin/python -m pytest -q tests/test_asr_router.py
 
 # 查看覆盖率
-pytest --cov=src
+./.venv/bin/python -m pytest --cov=src
 ```
 
 ---
@@ -152,6 +158,5 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 ## 🙏 致谢
 
-- [KlicStudio](https://github.com/Huanshere/VideoLingo) - 翻译配音引擎
 - [social-auto-upload](https://github.com/dreammis/social-auto-upload) - 多平台发布
 - [vibe-coding-cn](https://github.com/tukuaiai/vibe-coding-cn) - 工程化方法论

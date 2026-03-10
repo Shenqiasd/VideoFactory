@@ -54,7 +54,7 @@ def print_task(task, detail=False):
         print(f"   URL: {task.source_url}")
         print(f"   语言: {task.source_lang} → {task.target_lang}")
         print(f"   TTS: {'是' if task.enable_tts else '否'}")
-        print(f"   KlicStudio: {task.klic_task_id or 'N/A'} ({task.klic_progress}%)")
+        print(f"   翻译链路: {task.translation_task_id or 'N/A'} ({task.translation_progress}%)")
 
         if task.translated_title:
             print(f"   翻译标题: {task.translated_title}")

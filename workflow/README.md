@@ -111,7 +111,7 @@ cat workflow/architecture.md
 # （按设计逐步实现）
 
 # 3. 运行测试
-python3.11 -m pytest -q
+./.venv/bin/python -m pytest -q
 
 # 4. 记录进度
 echo "- $(date +%H:%M) [Codex] 完成 src/xxx.py" >> workflow/progress.md
@@ -168,9 +168,9 @@ echo "- $(date +%H:%M) [Codex] 完成 src/xxx.py" >> workflow/progress.md
 
 ## 与现有脚本协作
 - 启停服务：`bash scripts/start_all.sh start|stop|status|logs`
-- API 服务：`python3.11 scripts/start_server.py`
-- Worker：`python3.11 workers/main.py`
-- 全量测试：`python3.11 -m pytest -q`
+- API 服务：`./.venv/bin/python scripts/start_server.py`
+- Worker：`./.venv/bin/python workers/main.py`
+- 全量测试：`./.venv/bin/python -m pytest -q`
 
 ---
 

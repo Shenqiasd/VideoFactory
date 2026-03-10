@@ -29,7 +29,7 @@
                 <span class="px-1.5 py-0.5 rounded-md bg-muted text-[10px] text-fg font-medium">{{ task.scope_label }}</span>
                 {% endif %}
                 <span>·</span>
-                <span>{{ task.created_at }}</span>
+                <span>{{ task.created_at_display }}</span>
                 {% if task.platforms %}
                 <span>·</span>
                 {% for platform in task.platforms %}
@@ -86,7 +86,7 @@
                         class="block w-full text-left px-3 py-1.5 text-[13px] text-red-500 hover:bg-red-50 transition">取消</button>
                 {% endif %}
                 <button hx-delete="/api/tasks/{{ task.task_id }}" hx-confirm="确定删除任务？此操作不可恢复。" hx-swap="none"
-                        hx-on::after-request="if(event.detail.successful){htmx.ajax('GET','/web/partials/task_list',{target:'#task-list-container',swap:'innerHTML'});showToast('任务已删除','success');}"
+                        hx-on::after-request="if(event.detail.successful){window.dispatchEvent(new CustomEvent('vf:task-list-refresh'));showToast('任务已删除','success');}"
                         @click.prevent
                         class="block w-full text-left px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50 transition">删除任务</button>
             </div>

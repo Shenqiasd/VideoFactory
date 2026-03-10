@@ -1,6 +1,6 @@
 # 当前实施计划
 
-更新时间：2026-03-03
+更新时间：2026-03-09
 
 ## 目标
 建立稳定的“需求->设计->实现->验证->发布”工程化流程，并与当前 video-factory 代码结构对齐。
@@ -15,7 +15,11 @@
 - [ ] 将 API 路由清单自动导出到 `workflow/artifacts/`
 - [ ] 增加任务端到端 smoke 测试脚本（不替代 pytest）
 - [ ] 配置脱敏改造（API key 从环境变量读取）
-- [ ] 修复 pages 层时间戳/平台字段不一致问题
+
+## 最近完成
+- [x] 统一本地运行入口：默认 API 端口收口到 `9000`，`start_all.sh` 改为解析 `VF_PYTHON_BIN` / `.venv/bin/python` / `python3.11`
+- [x] 启动脚本去掉机器专属 KlicStudio / ffmpeg-full 路径，改为环境变量或 `config/settings.yaml` 显式配置，未配置时跳过 KlicStudio 启动
+- [x] 修复 pages 层时间戳/平台字段不一致问题，并移除 `TemplateResponse` 的 deprecation warning
 
 ## 风险与应对
 - 风险：服务依赖多、联调成本高。

@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # video-factory 一键启动脚本
-# 启动所有5个服务：Groq Whisper Proxy + Edge-TTS Proxy + KlicStudio + video-factory API + Worker
+# 启动本地依赖与主服务：Local LLM(可选) + Groq Whisper Proxy + Edge-TTS Proxy + video-factory API + Worker
 #
 # 用法: bash scripts/start_all.sh
 # 停止: bash scripts/start_all.sh stop
@@ -10,12 +10,12 @@
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-KLIC_DIR="/Users/enesource/Projects/KlicStudio/bin"
+CONFIG_FILE="$PROJECT_DIR/config/settings.yaml"
 PID_DIR="$PROJECT_DIR/.pids"
 LOG_DIR="$PROJECT_DIR/logs"
-PYTHON="/usr/local/bin/python3.11"  # 统一使用Python 3.11
-FFMPEG_FULL_DIR="/usr/local/opt/ffmpeg-full/bin"
-API_PORT="${VF_API_PORT:-8087}"
+PYTHON=""
+PYTHON_LABEL=""
+API_PORT="${VF_API_PORT:-9000}"
 
 # 颜色
 RED='\033[0;31m'
@@ -28,7 +28,191 @@ mkdir -p "$PID_DIR" "$LOG_DIR"
 
 FFMPEG_BIN=""
 FFMPEG_SUBTITLES="unknown"
+CFG_FFMPEG_PATH=""
+CFG_TRANSLATION_PROVIDER=""
+CFG_LOCAL_LLM_ENABLED=""
+CFG_LOCAL_LLM_BASE_URL=""
+CFG_LOCAL_LLM_MODEL=""
+RUNTIME_CONFIG_LOADED=0
+LOCAL_LLM_ENABLED=0
+LOCAL_LLM_SKIPPED=0
+LOCAL_LLM_BASE_URL=""
+LOCAL_LLM_MODEL=""
+LOCAL_LLM_HOST="127.0.0.1"
+LOCAL_LLM_PORT="1234"
 WORKER_HEARTBEAT_FILE="$HOME/.video-factory/worker_heartbeat.json"
+
+python_minor_version() {
+    local candidate="$1"
+    "$candidate" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null || true
+}
+
+resolve_python_3_11() {
+    local candidates=()
+    local candidate=""
+    local version=""
+
+    if [ -n "${VF_PYTHON_BIN:-}" ]; then
+        candidates+=("${VF_PYTHON_BIN}")
+    fi
+    if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
+        candidates+=("$PROJECT_DIR/.venv/bin/python")
+    fi
+    candidate="$(command -v python3.11 2>/dev/null || true)"
+    if [ -n "$candidate" ]; then
+        candidates+=("$candidate")
+    fi
+    candidate="$(command -v python3 2>/dev/null || true)"
+    if [ -n "$candidate" ]; then
+        candidates+=("$candidate")
+    fi
+
+    PYTHON=""
+    PYTHON_LABEL=""
+
+    for candidate in "${candidates[@]}"; do
+        [ -n "$candidate" ] || continue
+        version="$(python_minor_version "$candidate")"
+        if [ "$version" = "3.11" ]; then
+            PYTHON="$candidate"
+            PYTHON_LABEL="$candidate (Python 3.11)"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+ensure_python_3_11() {
+    local fallback_python=""
+    local fallback_version=""
+
+    if [ -n "$PYTHON" ]; then
+        return 0
+    fi
+
+    if resolve_python_3_11; then
+        return 0
+    fi
+
+    fallback_python="$(command -v python3 2>/dev/null || true)"
+    if [ -n "$fallback_python" ]; then
+        fallback_version="$(python_minor_version "$fallback_python")"
+    fi
+
+    echo -e "${RED}  ❌ 未找到可用的 Python 3.11 解释器${NC}"
+    echo -e "${YELLOW}  需要的解析顺序: VF_PYTHON_BIN -> $PROJECT_DIR/.venv/bin/python -> python3.11${NC}"
+    if [ -n "$fallback_version" ]; then
+        echo -e "${YELLOW}  当前 python3 版本: $fallback_version${NC}"
+    fi
+    echo -e "${YELLOW}  建议先执行:${NC}"
+    echo "     python3.11 -m venv .venv"
+    echo "     ./.venv/bin/python -m pip install -r requirements.txt"
+    return 1
+}
+
+config_lookup_path() {
+    local keys=("$@")
+
+    if [ -z "$PYTHON" ] || [ ! -f "$CONFIG_FILE" ]; then
+        return 0
+    fi
+
+    "$PYTHON" - "$CONFIG_FILE" "${keys[@]}" <<'PY'
+import pathlib
+import sys
+
+import yaml
+
+config_path = pathlib.Path(sys.argv[1])
+keys = sys.argv[2:]
+
+try:
+    data = yaml.safe_load(config_path.read_text()) or {}
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+node = data
+for key in keys:
+    if isinstance(node, dict):
+        node = node.get(key)
+    else:
+        node = ""
+        break
+    if node is None:
+        node = ""
+        break
+
+if isinstance(node, bool):
+    print("true" if node else "false")
+elif isinstance(node, (dict, list)):
+    print("")
+else:
+    print(node or "")
+PY
+}
+
+config_lookup() {
+    local section="$1"
+    local key="$2"
+    config_lookup_path "$section" "$key"
+}
+
+load_runtime_config() {
+    if [ "$RUNTIME_CONFIG_LOADED" -eq 1 ]; then
+        return 0
+    fi
+    RUNTIME_CONFIG_LOADED=1
+
+    if [ -z "$PYTHON" ] && ! resolve_python_3_11; then
+        return 0
+    fi
+
+    CFG_FFMPEG_PATH="$(config_lookup "ffmpeg" "path")"
+    CFG_TRANSLATION_PROVIDER="$(config_lookup_path "translation" "provider")"
+    CFG_LOCAL_LLM_ENABLED="$(config_lookup_path "translation" "local_llm" "enabled")"
+    CFG_LOCAL_LLM_BASE_URL="$(config_lookup_path "translation" "local_llm" "base_url")"
+    CFG_LOCAL_LLM_MODEL="$(config_lookup_path "translation" "local_llm" "model")"
+}
+
+resolve_local_llm_runtime() {
+    local enabled=""
+    local provider=""
+
+    load_runtime_config
+
+    LOCAL_LLM_ENABLED=0
+    LOCAL_LLM_SKIPPED=0
+    LOCAL_LLM_HOST="127.0.0.1"
+    LOCAL_LLM_PORT="1234"
+    LOCAL_LLM_BASE_URL="${VF_TRANSLATION_LOCAL_LLM_BASE_URL:-${CFG_LOCAL_LLM_BASE_URL:-}}"
+    LOCAL_LLM_MODEL="${VF_TRANSLATION_LOCAL_LLM_MODEL:-${CFG_LOCAL_LLM_MODEL:-}}"
+    enabled="${VF_TRANSLATION_LOCAL_LLM_ENABLED:-${CFG_LOCAL_LLM_ENABLED:-}}"
+    provider="${VF_TRANSLATION_PROVIDER:-${CFG_TRANSLATION_PROVIDER:-}}"
+
+    if [ "$provider" = "local_llm" ] && { [ "$enabled" = "true" ] || [ "$enabled" = "1" ]; }; then
+        LOCAL_LLM_ENABLED=1
+    else
+        return 0
+    fi
+
+    if [ -n "$LOCAL_LLM_BASE_URL" ] && [ -n "$PYTHON" ]; then
+        read -r LOCAL_LLM_HOST LOCAL_LLM_PORT <<EOF
+$("$PYTHON" - "$LOCAL_LLM_BASE_URL" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+raw = sys.argv[1].strip()
+parsed = urlparse(raw if "://" in raw else f"http://{raw}")
+host = parsed.hostname or "127.0.0.1"
+port = parsed.port or (443 if parsed.scheme == "https" else 80)
+print(host, port)
+PY
+)
+EOF
+    fi
+}
 
 # ========== 停止所有服务 ==========
 stop_all() {
@@ -61,15 +245,6 @@ stop_all() {
         rm -f "$PID_DIR/tts_proxy.pid"
     fi
 
-    # 停止 KlicStudio
-    if [ -f "$PID_DIR/klicstudio.pid" ]; then
-        PID=$(cat "$PID_DIR/klicstudio.pid")
-        if kill -0 "$PID" 2>/dev/null; then
-            kill "$PID" 2>/dev/null && echo -e "${GREEN}  ✅ KlicStudio (PID: $PID) 已停止${NC}"
-        fi
-        rm -f "$PID_DIR/klicstudio.pid"
-    fi
-
     # 停止 Worker
     if [ -f "$PID_DIR/worker.pid" ]; then
         PID=$(cat "$PID_DIR/worker.pid")
@@ -77,6 +252,15 @@ stop_all() {
             kill "$PID" 2>/dev/null && echo -e "${GREEN}  ✅ Worker (PID: $PID) 已停止${NC}"
         fi
         rm -f "$PID_DIR/worker.pid"
+    fi
+
+    # 停止本地翻译 LLM
+    if [ -f "$PID_DIR/local_llm.pid" ]; then
+        PID=$(cat "$PID_DIR/local_llm.pid")
+        if kill -0 "$PID" 2>/dev/null; then
+            kill "$PID" 2>/dev/null && echo -e "${GREEN}  ✅ Local LLM (PID: $PID) 已停止${NC}"
+        fi
+        rm -f "$PID_DIR/local_llm.pid"
     fi
 
     # 兜底：清理未被 PID 文件管理的遗留 Worker（例如手动 python -m workers.main 启动）
@@ -87,7 +271,7 @@ stop_all() {
     fi
 
     # 兜底：检查端口上残留的进程
-    for PORT in 8866 8877 8888 "$API_PORT" 9000; do
+    for PORT in 1234 8866 8877 "$API_PORT" 9000; do
         PIDS=$(lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null || true)
         if [ -n "$PIDS" ]; then
             echo -e "${YELLOW}  清理端口 $PORT 上的残留进程: $PIDS${NC}"
@@ -119,6 +303,10 @@ wait_for_port() {
 }
 
 worker_heartbeat_age_seconds() {
+    if [ -z "$PYTHON" ]; then
+        echo "-1"
+        return 0
+    fi
     $PYTHON - "$WORKER_HEARTBEAT_FILE" 2>/dev/null <<'PY' || echo "-1"
 import json
 import pathlib
@@ -142,13 +330,10 @@ PY
 # ========== FFmpeg能力探测 ==========
 detect_ffmpeg_capability() {
     local configured="${VF_FFMPEG_PATH:-}"
-    local from_config=""
 
-    if [ -z "$configured" ] && [ -f "$PROJECT_DIR/config/settings.yaml" ]; then
-        from_config="$($PYTHON -c 'import sys, yaml; p=sys.argv[1]; d=yaml.safe_load(open(p, "r")) or {}; print(((d.get("ffmpeg") or {}).get("path")) or "")' "$PROJECT_DIR/config/settings.yaml" 2>/dev/null || true)"
-        if [ -n "$from_config" ]; then
-            configured="$from_config"
-        fi
+    load_runtime_config
+    if [ -z "$configured" ] && [ -n "$CFG_FFMPEG_PATH" ]; then
+        configured="$CFG_FFMPEG_PATH"
     fi
 
     if [ -n "$configured" ]; then
@@ -177,6 +362,12 @@ start_all() {
     local START_ERRORS=0
     local API_STARTED=0
 
+    if ! ensure_python_3_11; then
+        return 1
+    fi
+    load_runtime_config
+    resolve_local_llm_runtime
+
     echo ""
     echo -e "${BLUE}════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}  🚀 video-factory 一键启动${NC}"
@@ -190,46 +381,53 @@ start_all() {
     echo -e "${BLUE}[0/5] 探测 FFmpeg 能力...${NC}"
     detect_ffmpeg_capability
 
-    # ---------- 1. 启动 Groq Whisper Proxy (port 8866) ----------
-    echo -e "${BLUE}[1/5] 启动 Groq Whisper Proxy...${NC}"
+    # ---------- 1. 启动 Local LLM Translation Server (port 1234) ----------
+    echo -e "${BLUE}[1/5] 启动 Local LLM Translation Server...${NC}"
+    if [ "$LOCAL_LLM_ENABLED" -ne 1 ]; then
+        LOCAL_LLM_SKIPPED=1
+        echo -e "${YELLOW}  ⚠️ translation.provider 不是 local_llm，或 local_llm.enabled 未开启，本次跳过${NC}"
+    elif [ -z "$LOCAL_LLM_MODEL" ]; then
+        echo -e "${RED}  ❌ local_llm 已启用，但未配置 translation.local_llm.model${NC}"
+        START_ERRORS=$((START_ERRORS + 1))
+    else
+        cd "$PROJECT_DIR"
+        nohup "$PYTHON" -m mlx_lm server \
+            --model "$LOCAL_LLM_MODEL" \
+            --host "$LOCAL_LLM_HOST" \
+            --port "$LOCAL_LLM_PORT" \
+            --temp 0.2 \
+            --max-tokens 1024 > "$LOG_DIR/local_llm.log" 2>&1 &
+        echo $! > "$PID_DIR/local_llm.pid"
+        if ! wait_for_port "$LOCAL_LLM_PORT" "Local LLM Translation Server" 900; then
+            START_ERRORS=$((START_ERRORS + 1))
+            rm -f "$PID_DIR/local_llm.pid"
+        fi
+    fi
+
+    # ---------- 2. 启动 Groq Whisper Proxy (port 8866) ----------
+    echo -e "${BLUE}[2/5] 启动 Groq Whisper Proxy...${NC}"
     cd "$PROJECT_DIR"
-    nohup $PYTHON scripts/groq_whisper_proxy.py > "$LOG_DIR/whisper_proxy.log" 2>&1 &
+    nohup "$PYTHON" scripts/groq_whisper_proxy.py > "$LOG_DIR/whisper_proxy.log" 2>&1 &
     echo $! > "$PID_DIR/whisper_proxy.pid"
     if ! wait_for_port 8866 "Groq Whisper Proxy" 15; then
         START_ERRORS=$((START_ERRORS + 1))
         rm -f "$PID_DIR/whisper_proxy.pid"
     fi
 
-    # ---------- 2. 启动 Edge-TTS Proxy (port 8877) ----------
-    echo -e "${BLUE}[2/5] 启动 Edge-TTS Proxy...${NC}"
+    # ---------- 3. 启动 Edge-TTS Proxy (port 8877) ----------
+    echo -e "${BLUE}[3/5] 启动 Edge-TTS Proxy...${NC}"
     cd "$PROJECT_DIR"
-    nohup $PYTHON scripts/edge_tts_proxy.py > "$LOG_DIR/tts_proxy.log" 2>&1 &
+    nohup "$PYTHON" scripts/edge_tts_proxy.py > "$LOG_DIR/tts_proxy.log" 2>&1 &
     echo $! > "$PID_DIR/tts_proxy.pid"
     if ! wait_for_port 8877 "Edge-TTS Proxy" 15; then
         START_ERRORS=$((START_ERRORS + 1))
         rm -f "$PID_DIR/tts_proxy.pid"
     fi
 
-    # ---------- 3. 启动 KlicStudio (port 8888) ----------
-    echo -e "${BLUE}[3/5] 启动 KlicStudio Server...${NC}"
-    cd "$KLIC_DIR"
-    if [ -x "$FFMPEG_FULL_DIR/ffmpeg" ] && [ -x "$FFMPEG_FULL_DIR/ffprobe" ]; then
-        echo -e "${GREEN}  ✅ KlicStudio 使用 ffmpeg-full: $FFMPEG_FULL_DIR${NC}"
-        nohup env PATH="$FFMPEG_FULL_DIR:$PATH" ./KlicStudio_1.4.0_macOS_amd64 > "$LOG_DIR/klicstudio.log" 2>&1 &
-    else
-        echo -e "${YELLOW}  ⚠️ 未找到 ffmpeg-full，KlicStudio 将使用系统 PATH 中的 ffmpeg${NC}"
-        nohup ./KlicStudio_1.4.0_macOS_amd64 > "$LOG_DIR/klicstudio.log" 2>&1 &
-    fi
-    echo $! > "$PID_DIR/klicstudio.pid"
-    if ! wait_for_port 8888 "KlicStudio Server" 15; then
-        START_ERRORS=$((START_ERRORS + 1))
-        rm -f "$PID_DIR/klicstudio.pid"
-    fi
-
     # ---------- 4. 启动 video-factory API ----------
     echo -e "${BLUE}[4/5] 启动 video-factory API...${NC}"
     cd "$PROJECT_DIR"
-    nohup env VF_API_PORT="$API_PORT" $PYTHON scripts/start_server.py > "$LOG_DIR/api.log" 2>&1 &
+    nohup env VF_API_PORT="$API_PORT" "$PYTHON" scripts/start_server.py > "$LOG_DIR/api.log" 2>&1 &
     echo $! > "$PID_DIR/api.pid"
     if wait_for_port "$API_PORT" "video-factory API" 15; then
         API_STARTED=1
@@ -242,7 +440,7 @@ start_all() {
     echo -e "${BLUE}[5/5] 启动 Worker (Orchestrator + Scheduler)...${NC}"
     if [ "$API_STARTED" -eq 1 ]; then
         cd "$PROJECT_DIR"
-        nohup $PYTHON workers/main.py > "$LOG_DIR/worker.log" 2>&1 &
+        nohup "$PYTHON" workers/main.py > "$LOG_DIR/worker.log" 2>&1 &
         echo $! > "$PID_DIR/worker.pid"
         sleep 2
         if kill -0 "$(cat "$PID_DIR/worker.pid")" 2>/dev/null; then
@@ -272,9 +470,13 @@ start_all() {
         echo -e "${YELLOW}════════════════════════════════════════════════════${NC}"
     fi
     echo ""
+    if [ "$LOCAL_LLM_SKIPPED" -eq 1 ]; then
+        echo -e "  🧠 Local LLM:         ${YELLOW}未启用（已跳过）${NC}"
+    else
+        echo -e "  🧠 Local LLM:         ${BLUE}http://${LOCAL_LLM_HOST}:${LOCAL_LLM_PORT}${NC}  (本地翻译 OpenAI 兼容接口)"
+    fi
     echo -e "  🎤 Whisper Proxy:     ${BLUE}http://localhost:8866${NC}  (Groq Whisper API代理)"
     echo -e "  🗣️  TTS Proxy:         ${BLUE}http://localhost:8877${NC}  (Edge-TTS → OpenAI API)"
-    echo -e "  🎬 KlicStudio:        ${BLUE}http://localhost:8888${NC}  (翻译引擎)"
     echo -e "  🏭 video-factory API: ${BLUE}http://localhost:${API_PORT}${NC}  (主控API)"
     echo -e "  🔁 Worker:            ${BLUE}后台运行${NC}  (编排器/调度器)"
     echo -e "  📖 API文档:           ${BLUE}http://localhost:${API_PORT}/docs${NC}"
@@ -293,11 +495,25 @@ start_all() {
 
 # ========== 查看状态 ==========
 status_all() {
+    resolve_python_3_11 >/dev/null 2>&1 || true
+    load_runtime_config
+
     echo ""
     echo -e "${BLUE}═══ 服务状态 ═══${NC}"
     echo ""
 
-    for PORT_INFO in "8866:Groq Whisper Proxy" "8877:Edge-TTS Proxy" "8888:KlicStudio" "${API_PORT}:video-factory API"; do
+    resolve_local_llm_runtime
+
+    if lsof -nP -iTCP:${LOCAL_LLM_PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
+        PID=$(lsof -nP -iTCP:${LOCAL_LLM_PORT} -sTCP:LISTEN -t 2>/dev/null | head -1)
+        echo -e "  ${GREEN}✅ Local LLM${NC} (端口: ${LOCAL_LLM_PORT}, PID: $PID)"
+    elif [ "$LOCAL_LLM_ENABLED" -eq 1 ]; then
+        echo -e "  ${RED}❌ Local LLM${NC} (端口: ${LOCAL_LLM_PORT}, 未运行)"
+    else
+        echo -e "  ${YELLOW}⚠️ Local LLM${NC} (未启用)"
+    fi
+
+    for PORT_INFO in "8866:Groq Whisper Proxy" "8877:Edge-TTS Proxy" "${API_PORT}:video-factory API"; do
         PORT="${PORT_INFO%%:*}"
         SERVICE="${PORT_INFO#*:}"
 
@@ -317,6 +533,8 @@ status_all() {
                 echo -e "  ${GREEN}✅ Worker${NC} (PID: $WORKER_PID, heartbeat: ${AGE}s)"
             elif [ "$AGE" -ge 0 ]; then
                 echo -e "  ${YELLOW}⚠️ Worker${NC} (PID: $WORKER_PID, heartbeat stale: ${AGE}s)"
+            elif [ -z "$PYTHON" ]; then
+                echo -e "  ${YELLOW}⚠️ Worker${NC} (PID: $WORKER_PID, 未找到 Python 3.11，无法读取 heartbeat)"
             else
                 echo -e "  ${YELLOW}⚠️ Worker${NC} (PID: $WORKER_PID, heartbeat missing)"
             fi
@@ -328,6 +546,9 @@ status_all() {
     fi
 
     detect_ffmpeg_capability
+    if [ -n "$PYTHON_LABEL" ]; then
+        echo -e "  ${BLUE}ℹ️ Python 解释器${NC}: $PYTHON_LABEL"
+    fi
     echo ""
 }
 
@@ -342,8 +563,8 @@ logs() {
         tts)
             tail -f "$LOG_DIR/tts_proxy.log"
             ;;
-        klic|klicstudio)
-            tail -f "$LOG_DIR/klicstudio.log"
+        local_llm|llm)
+            tail -f "$LOG_DIR/local_llm.log"
             ;;
         api|factory)
             tail -f "$LOG_DIR/api.log"
@@ -377,7 +598,7 @@ case "${1:-start}" in
         logs "$@"
         ;;
     *)
-        echo "用法: $0 {start|stop|restart|status|logs [whisper|tts|klic|api|worker|all]}"
+        echo "用法: $0 {start|stop|restart|status|logs [local_llm|whisper|tts|api|worker|all]}"
         exit 1
         ;;
 esac

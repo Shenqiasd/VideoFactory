@@ -109,6 +109,14 @@ class Orchestrator:
 
             # Phase 3: 发布 — 仅 full
             if task.state == TaskState.READY_TO_PUBLISH.value:
+                creation_status = getattr(task, "creation_status", {}) or {}
+                if (
+                    creation_status.get("review_required")
+                    and creation_status.get("review_status") != "approved"
+                ):
+                    logger.info(f"⏸️ 任务等待创作审核: {task.task_id}")
+                    return True
+
                 if scope == "full":
                     task.transition(TaskState.PUBLISHING)
                     self.task_store.update(task)

@@ -14,7 +14,7 @@
         {% for task in tasks %}
         <tr class="border-b border-border last:border-0 hover:bg-muted/50 transition cursor-pointer" onclick="location.href='/tasks/{{ task.task_id }}'">
             <td class="py-3">
-                <div class="text-[14px] font-medium text-fg-strong truncate max-w-[300px]">{{ task.original_title or '未命名' }}</div>
+                <div class="text-[14px] font-medium text-fg-strong truncate max-w-[300px]">{{ task.display_title }}</div>
                 <div class="text-[12px] text-fg-faint font-mono">{{ task.task_id[:8] }}</div>
             </td>
             <td class="py-3 text-[13px] text-fg-sub">{{ task.completed_at }}</td>

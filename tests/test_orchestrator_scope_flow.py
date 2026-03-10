@@ -89,3 +89,35 @@ async def test_subtitle_dub_completes_without_factory():
     assert success is True
     assert factory.run.await_count == 0
     assert task.state == TaskState.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_full_scope_waits_for_creation_review_before_publishing():
+    store = DummyTaskStore()
+    production = SimpleNamespace(run=AsyncMock(return_value=True), close=AsyncMock())
+    factory = SimpleNamespace(run=AsyncMock(return_value=True), close=AsyncMock())
+    scheduler = SimpleNamespace(schedule_staggered=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("should not publish")))
+    notifier = SimpleNamespace(notify_error=AsyncMock(), close=AsyncMock())
+
+    orchestrator = Orchestrator(
+        task_store=store,
+        production=production,
+        factory=factory,
+        scheduler=scheduler,
+        notifier=notifier,
+    )
+
+    task = Task(
+        source_url="https://example.com/video",
+        state=TaskState.READY_TO_PUBLISH.value,
+        task_scope="full",
+        creation_status={
+            "review_required": True,
+            "review_status": "pending",
+        },
+    )
+
+    success = await orchestrator.process_task(task)
+
+    assert success is True
+    assert task.state == TaskState.READY_TO_PUBLISH.value

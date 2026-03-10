@@ -41,7 +41,7 @@ class TaskState(str, Enum):
         return [
             cls.QUEUED, cls.DOWNLOADING, cls.DOWNLOADED,
             cls.UPLOADING_SOURCE, cls.TRANSLATING,
-            cls.QC_CHECKING, cls.PROCESSING,
+            cls.QC_CHECKING, cls.QC_PASSED, cls.PROCESSING,
             cls.UPLOADING_PRODUCTS, cls.PUBLISHING
         ]
 
@@ -76,6 +76,128 @@ SCOPE_LABELS = {
     "dub_and_copy": "配音+文案",
     "full": "全流程",
 }
+
+# ========== Creation 配置 ==========
+
+VALID_CREATION_AUDIO_SOURCES = ("dubbed_audio", "source_audio", "none")
+VALID_CREATION_REVIEW_MODES = ("required", "manual", "none")
+VALID_CREATION_HIGHLIGHT_STRATEGIES = ("hybrid", "semantic", "legacy")
+VALID_CREATION_CROP_MODES = ("smart", "center")
+DEFAULT_CREATION_PLATFORMS = ["douyin", "xiaohongshu", "bilibili"]
+
+
+def normalize_creation_config(
+    raw_config: Optional[Dict[str, Any]],
+    *,
+    enable_short_clips: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """标准化 creation 配置，兼容旧任务缺少字段的情况。"""
+    config: Dict[str, Any] = {
+        "enabled": True if enable_short_clips is None else bool(enable_short_clips),
+        "clip_count": 5,
+        "duration_min": 30,
+        "duration_max": 180,
+        "platforms": list(DEFAULT_CREATION_PLATFORMS),
+        "audio_signal_source": "dubbed_audio",
+        "review_mode": "required",
+        "template_set": "default_knowledge",
+        "highlight_strategy": "hybrid",
+        "crop_mode": "smart",
+        "intro_path": "",
+        "outro_path": "",
+        "bgm_path": "",
+        "bgm_volume": 0.18,
+        "transition": "fade",
+        "transition_duration": 0.35,
+    }
+
+    if not isinstance(raw_config, dict):
+        return config
+
+    if "enabled" in raw_config:
+        config["enabled"] = bool(raw_config.get("enabled"))
+
+    for key in ("clip_count", "duration_min", "duration_max"):
+        value = raw_config.get(key)
+        if value is None:
+            continue
+        try:
+            config[key] = int(value)
+        except (TypeError, ValueError):
+            continue
+
+    config["clip_count"] = max(1, min(10, int(config["clip_count"])))
+    config["duration_min"] = max(10, int(config["duration_min"]))
+    config["duration_max"] = max(config["duration_min"], int(config["duration_max"]))
+
+    platforms = raw_config.get("platforms")
+    if isinstance(platforms, list):
+        normalized_platforms = []
+        for item in platforms:
+            value = str(item or "").strip().lower()
+            if value and value not in normalized_platforms:
+                normalized_platforms.append(value)
+        if normalized_platforms:
+            config["platforms"] = normalized_platforms
+
+    audio_signal_source = str(raw_config.get("audio_signal_source", config["audio_signal_source"])).strip().lower()
+    if audio_signal_source in VALID_CREATION_AUDIO_SOURCES:
+        config["audio_signal_source"] = audio_signal_source
+
+    review_mode = str(raw_config.get("review_mode", config["review_mode"])).strip().lower()
+    if review_mode == "manual":
+        review_mode = "required"
+    if review_mode in VALID_CREATION_REVIEW_MODES:
+        config["review_mode"] = "required" if review_mode == "manual" else review_mode
+
+    highlight_strategy = str(raw_config.get("highlight_strategy", config["highlight_strategy"])).strip().lower()
+    if highlight_strategy in VALID_CREATION_HIGHLIGHT_STRATEGIES:
+        config["highlight_strategy"] = highlight_strategy
+
+    crop_mode = str(raw_config.get("crop_mode", config["crop_mode"])).strip().lower()
+    if crop_mode in VALID_CREATION_CROP_MODES:
+        config["crop_mode"] = crop_mode
+
+    for key in ("template_set", "intro_path", "outro_path", "bgm_path", "transition"):
+        value = raw_config.get(key)
+        if value is not None:
+            config[key] = str(value).strip()
+
+    for key in ("bgm_volume", "transition_duration"):
+        value = raw_config.get(key)
+        if value is None:
+            continue
+        try:
+            config[key] = float(value)
+        except (TypeError, ValueError):
+            continue
+
+    config["bgm_volume"] = max(0.0, min(1.0, float(config["bgm_volume"])))
+    config["transition_duration"] = max(0.0, min(2.0, float(config["transition_duration"])))
+    return config
+
+
+def initial_creation_state(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    enabled = bool((config or {}).get("enabled", True)) if isinstance(config, dict) else True
+    review_mode = (
+        str((config or {}).get("review_mode", "required")).strip().lower()
+        if isinstance(config, dict)
+        else "required"
+    )
+    review_status = "pending" if enabled and review_mode in {"required", "manual"} else "not_required"
+    return {
+        "enabled": enabled,
+        "status": "idle",
+        "stage": "",
+        "review_status": review_status,
+        "segments_total": 0,
+        "segments_completed": 0,
+        "variants_total": 0,
+        "variants_completed": 0,
+        "selected_segments": [],
+        "warnings": [],
+        "used_fallback": False,
+    }
 
 
 # 合法的状态转换
@@ -145,9 +267,9 @@ class Task:
     tts_audio_path: str = ""         # 配音音频路径（支持 wav/mp3/ogg/pcm）
     transcript_text: str = ""        # 翻译后的文本
 
-    # KlicStudio相关
-    klic_task_id: str = ""           # KlicStudio返回的任务ID
-    klic_progress: int = 0
+    # 翻译阶段运行信息
+    translation_task_id: str = ""
+    translation_progress: int = 0
 
     # 翻译后的信息
     translated_title: str = ""
@@ -166,10 +288,29 @@ class Task:
     enable_tts: bool = True
     enable_short_clips: bool = True
     enable_article: bool = True
+    creation_config: Dict[str, Any] = field(default_factory=dict)
+    creation_state: Dict[str, Any] = field(default_factory=dict)
     embed_subtitle_type: str = "horizontal"  # horizontal/vertical/none
     subtitle_style: Dict[str, Any] = field(default_factory=dict)
     priority: int = 2  # 0=紧急 1=高 2=普通 3=低
     publish_accounts: Dict[str, str] = field(default_factory=dict)
+    creation_status: Dict[str, Any] = field(default_factory=dict)
+
+    def _has_reviewable_short_clips(self) -> bool:
+        """仅在真实生成出短视频产物时才触发审核。"""
+        for product in self.products:
+            if not isinstance(product, dict) or product.get("type") != "short_clip":
+                continue
+            if str(product.get("local_path", "")).strip() or str(product.get("r2_path", "")).strip():
+                return True
+        return False
+
+    def _compute_creation_review_required(self) -> bool:
+        return (
+            self.creation_state.get("enabled", self.enable_short_clips)
+            and self.creation_config.get("review_mode") == "required"
+            and self._has_reviewable_short_clips()
+        )
 
     def __post_init__(self):
         if not self.task_id:
@@ -198,6 +339,31 @@ class Task:
             self.subtitle_style,
             defaults=get_subtitle_style_defaults(),
         )
+        self.creation_config = normalize_creation_config(
+            self.creation_config,
+            enable_short_clips=self.enable_short_clips,
+        )
+        if not self.creation_state:
+            self.creation_state = initial_creation_state(self.creation_config)
+        else:
+            merged_creation_state = initial_creation_state(self.creation_config)
+            if isinstance(self.creation_state, dict):
+                merged_creation_state.update(self.creation_state)
+            self.creation_state = merged_creation_state
+        if not isinstance(self.creation_status, dict) or not self.creation_status:
+            review_required = self._compute_creation_review_required()
+            self.creation_status = {
+                "enabled": self.creation_state.get("enabled", self.enable_short_clips),
+                "status": self.creation_state.get("status", "idle"),
+                "review_required": review_required,
+                "review_status": self.creation_state.get("review_status", "pending"),
+                "segments": self.creation_state.get("selected_segments", []),
+                "stats": {
+                    "segments_total": self.creation_state.get("segments_total", 0),
+                    "segments_completed": self.creation_state.get("segments_completed", 0),
+                    "variants_total": self.creation_state.get("variants_total", 0),
+                },
+            }
 
     def _append_timeline(
         self,
@@ -310,6 +476,43 @@ class Task:
     def add_product(self, product: TaskProduct):
         """添加产出物"""
         self.products.append(asdict(product))
+        if isinstance(self.creation_state, dict):
+            self.update_creation_state()
+
+    def update_creation_state(self, **kwargs):
+        """更新创作阶段状态，供工厂/API 展示。"""
+        if not isinstance(self.creation_state, dict):
+            self.creation_state = initial_creation_state(self.creation_config)
+        self.creation_state.update({k: v for k, v in kwargs.items() if v is not None})
+        review_required = self._compute_creation_review_required()
+        self.creation_status = {
+            "enabled": self.creation_state.get("enabled", self.enable_short_clips),
+            "status": self.creation_state.get("status", "idle"),
+            "stage": self.creation_state.get("stage", ""),
+            "review_required": review_required,
+            "review_status": self.creation_state.get("review_status", "pending"),
+            "segments": self.creation_state.get("selected_segments", []),
+            "stats": {
+                "segments_total": self.creation_state.get("segments_total", 0),
+                "segments_completed": self.creation_state.get("segments_completed", 0),
+                "variants_total": self.creation_state.get("variants_total", 0),
+                "variants_completed": self.creation_state.get("variants_completed", 0),
+            },
+            "warnings": self.creation_state.get("warnings", []),
+            "used_fallback": self.creation_state.get("used_fallback", False),
+        }
+
+    def mark_creation_stage(self, stage: str, **payload):
+        """记录 creation 阶段进度，并写入时间线。"""
+        if not stage:
+            return
+        self.update_creation_state(stage=stage, status="running", **payload)
+        self._append_timeline(
+            "creation_stage",
+            stage=stage,
+            record_time=False,
+            **payload,
+        )
 
     def to_dict(self) -> dict:
         """转为字典"""
@@ -322,7 +525,14 @@ class Task:
     @classmethod
     def from_dict(cls, data: dict) -> "Task":
         """从字典创建"""
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        normalized = dict(data)
+        if "translation_task_id" not in normalized and "klic_task_id" in normalized:
+            normalized["translation_task_id"] = normalized.get("klic_task_id", "")
+        if "translation_progress" not in normalized and "klic_progress" in normalized:
+            normalized["translation_progress"] = normalized.get("klic_progress", 0)
+        normalized.pop("klic_task_id", None)
+        normalized.pop("klic_progress", None)
+        return cls(**{k: v for k, v in normalized.items() if k in cls.__dataclass_fields__})
 
     @classmethod
     def from_json(cls, json_str: str) -> "Task":

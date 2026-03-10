@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -12,6 +13,48 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ARTIFACT_DIR = PROJECT_ROOT / "tests" / "artifacts"
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_python_3_11() -> str:
+    candidates = []
+    override = os.environ.get("VF_PYTHON_BIN")
+    if override:
+        candidates.append(override)
+
+    venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
+    if venv_python.exists():
+        candidates.append(str(venv_python))
+
+    python311 = shutil.which("python3.11")
+    if python311:
+        candidates.append(python311)
+
+    python3 = shutil.which("python3")
+    if python3:
+        candidates.append(python3)
+
+    candidates.append(sys.executable)
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            version = subprocess.check_output(
+                [
+                    candidate,
+                    "-c",
+                    "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')",
+                ],
+                text=True,
+            ).strip()
+        except Exception:
+            continue
+        if version == "3.11":
+            return candidate
+
+    raise RuntimeError("未找到可用的 Python 3.11（可设置 VF_PYTHON_BIN 或创建 .venv）")
 
 
 def _wait_server_ready(process: subprocess.Popen, base_url: str, timeout_seconds: float = 20.0):
@@ -36,6 +79,10 @@ def _wait_server_ready(process: subprocess.Popen, base_url: str, timeout_seconds
 @pytest.fixture(scope="module")
 def live_server(tmp_path_factory):
     home_dir = tmp_path_factory.mktemp("vf-e2e-home")
+    try:
+        python_bin = _resolve_python_3_11()
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
     env = os.environ.copy()
     env["HOME"] = str(home_dir)
     env["VF_DB_PATH"] = str(home_dir / "video_factory.db")
@@ -47,7 +94,7 @@ def live_server(tmp_path_factory):
 
     base_url = "http://127.0.0.1:9010"
     cmd = [
-        sys.executable,
+        python_bin,
         "-m",
         "uvicorn",
         "api.server:app",
@@ -175,6 +222,95 @@ def test_new_task_page_submit_button_creates_task(live_server, browser_page):
 
     assert page.locator("#task-list-container").count() == 1
     assert page.locator("text=e2e_form_case").count() > 0
+
+
+def _seed_task(
+    home_dir: Path,
+    task_id: str,
+    title: str,
+    state: str,
+    **overrides,
+):
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+    from core.task import Task, TaskStore
+
+    store = TaskStore(store_path=str(home_dir / ".video-factory" / "tasks.json"))
+    task = Task(
+        task_id=task_id,
+        source_url="https://example.com/video",
+        source_title=title,
+        source_lang="en",
+        target_lang="zh_cn",
+    )
+    task.state = state
+    for key, value in overrides.items():
+        setattr(task, key, value)
+    store.update(task)
+
+
+def test_tasks_page_honors_status_query_filter(live_server, live_server_home, browser_page):
+    page = browser_page
+
+    _seed_task(
+        live_server_home,
+        "vf_e2e_completed_filter",
+        "筛选完成任务",
+        "completed",
+        progress=100,
+    )
+    _seed_task(
+        live_server_home,
+        "vf_e2e_failed_filter",
+        "筛选失败任务",
+        "failed",
+        progress=63,
+    )
+
+    page.goto(f"{live_server}/tasks?status=completed", wait_until="domcontentloaded")
+    page.locator("text=筛选完成任务").wait_for(timeout=3000)
+    page.wait_for_timeout(300)
+
+    assert page.locator("text=筛选完成任务").count() > 0
+    assert page.locator("text=筛选失败任务").count() == 0
+
+
+def test_task_detail_page_renders_translation_and_failed_step_context(live_server, live_server_home, browser_page):
+    page = browser_page
+    now = time.time()
+    task_id = "vf_e2e_failed_detail"
+    timeline = [
+        {"event": "task_created", "timestamp": now - 300, "to_state": "queued"},
+        {"event": "state_transition", "timestamp": now - 240, "to_state": "downloading"},
+        {"event": "step_transition", "timestamp": now - 180, "to_step": "translating"},
+        {"event": "state_transition", "timestamp": now - 120, "to_state": "translating"},
+        {"event": "step_transition", "timestamp": now - 30, "to_step": "failed"},
+        {"event": "state_transition", "timestamp": now - 20, "to_state": "failed"},
+    ]
+    _seed_task(
+        live_server_home,
+        task_id,
+        "详情失败任务",
+        "failed",
+        progress=67,
+        last_step="failed",
+        translated_title="失败任务中文标题",
+        translation_task_id="selfhosted_whisper_vf_e2e_failed_detail",
+        translation_progress=67,
+        qc_score=58,
+        qc_details="字幕覆盖率不足",
+        timeline=timeline,
+        error_message="翻译阶段失败",
+    )
+
+    page.goto(f"{live_server}/tasks/{task_id}", wait_until="domcontentloaded")
+    page.locator("#task-title", has_text="详情失败任务").wait_for(timeout=3000)
+    page.wait_for_timeout(300)
+
+    assert page.locator("#task-state").text_content() == "失败"
+    assert page.locator("#task-last-step").text_content() == "翻译中（失败）"
+    assert page.locator("#task-translated-title").text_content() == "失败任务中文标题"
+    assert "selfhosted_whisper_vf_e2e_failed_detail" in page.locator("#task-translation-meta").text_content()
+    assert "67%" in page.locator("#task-translation-meta").text_content()
 
 
 def test_publish_storage_settings_pages_load(live_server, browser_page):

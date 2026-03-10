@@ -1,0 +1,2 @@
+# Netscape HTTP Cookie File
+.example.com	TRUE	/	FALSE	0	token	abc

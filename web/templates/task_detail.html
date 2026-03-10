@@ -11,6 +11,7 @@
 <div class="rounded-3xl border border-border p-6 shadow-card">
     <div class="flex items-center justify-between gap-3 mb-5">
         <div>
+            <div class="text-[18px] font-semibold text-fg-strong mb-1" id="task-title">加载中...</div>
             <div class="text-[12px] text-fg-sub">任务 ID</div>
             <div class="text-[14px] font-mono text-fg-strong" id="task-id">{{ task_id }}</div>
         </div>
@@ -22,7 +23,7 @@
         <!-- JS 动态渲染 -->
     </div>
 
-    <div class="grid grid-cols-3 gap-4 text-[13px]">
+    <div class="grid grid-cols-4 gap-4 text-[13px]">
         <div class="rounded-2xl bg-muted px-4 py-3">
             <div class="text-fg-sub mb-1">状态</div>
             <div class="text-fg-strong font-medium" id="task-state">加载中...</div>
@@ -36,6 +37,10 @@
             <div class="text-fg-strong font-medium" id="task-scope">-</div>
         </div>
         <div class="rounded-2xl bg-muted px-4 py-3">
+            <div class="text-fg-sub mb-1">语言</div>
+            <div class="text-fg-strong font-medium" id="task-language">-</div>
+        </div>
+        <div class="rounded-2xl bg-muted px-4 py-3">
             <div class="text-fg-sub mb-1">创建时间</div>
             <div class="text-fg-strong font-medium" id="task-created-at">-</div>
         </div>
@@ -47,11 +52,37 @@
             <div class="text-fg-sub mb-1">耗时</div>
             <div class="text-fg-strong font-medium" id="task-duration">-</div>
         </div>
+        <div class="rounded-2xl bg-muted px-4 py-3">
+            <div class="text-fg-sub mb-1">当前步骤</div>
+            <div class="text-fg-strong font-medium" id="task-last-step">-</div>
+        </div>
     </div>
 
     <div class="mt-4 rounded-2xl border border-border px-4 py-3">
         <div class="text-[12px] text-fg-sub mb-1">源视频地址</div>
         <div class="text-[13px] text-fg break-all" id="task-source-url">-</div>
+    </div>
+
+    <div class="mt-4 rounded-2xl border border-border px-4 py-3" id="translation-section" style="display:none">
+        <div class="text-[12px] text-fg-sub mb-2">翻译与质检</div>
+        <div class="grid grid-cols-2 gap-4 text-[13px]">
+            <div>
+                <div class="text-[12px] text-fg-faint mb-1">翻译标题</div>
+                <div class="text-fg-strong" id="task-translated-title">-</div>
+            </div>
+            <div>
+                <div class="text-[12px] text-fg-faint mb-1">翻译阶段</div>
+                <div class="text-fg-strong" id="task-translation-meta">-</div>
+            </div>
+            <div>
+                <div class="text-[12px] text-fg-faint mb-1">质检分数</div>
+                <div class="text-fg-strong" id="task-qc-score">-</div>
+            </div>
+            <div>
+                <div class="text-[12px] text-fg-faint mb-1">质检详情</div>
+                <div class="text-fg" id="task-qc-details">-</div>
+            </div>
+        </div>
     </div>
 
     <div class="mt-4 rounded-2xl border border-border px-4 py-3" id="error-section" style="display:none">
@@ -103,6 +134,29 @@
         "full": "全流程"
     };
 
+    var stateLabels = {
+        "queued": "排队中",
+        "downloading": "下载中",
+        "downloaded": "已下载",
+        "uploading_source": "上传源文件",
+        "translating": "翻译中",
+        "qc_checking": "质检中",
+        "qc_passed": "质检通过",
+        "qc_failed": "质检失败",
+        "processing": "二次创作中",
+        "uploading_products": "上传产品",
+        "ready_to_publish": "待发布",
+        "publishing": "发布中",
+        "partial_success": "部分成功",
+        "completed": "已完成",
+        "failed": "失败"
+    };
+
+    var stepStateAliases = {
+        "qc_failed": "qc_checking",
+        "partial_success": "publishing"
+    };
+
     // scope → 对应的步骤列表 + 每步对应的状态
     var scopeSteps = {
         "subtitle_only": [
@@ -136,18 +190,41 @@
     };
 
     // 计算步骤的顺序号（用于对比已完成/进行中/未到达）
-    function getStepIndex(steps, state) {
-        if (state === "failed") return -1;
+    function inferDisplayStepState(state, lastStep, timeline) {
+        if (state !== "failed") {
+            return lastStep || state;
+        }
+
+        if (lastStep && lastStep !== "failed") {
+            return lastStep;
+        }
+
+        if (Array.isArray(timeline)) {
+            for (var i = timeline.length - 1; i >= 0; i--) {
+                var entry = timeline[i] || {};
+                var step = entry.to_step || entry.to_state || "";
+                if (step && step !== "failed") {
+                    return step;
+                }
+            }
+        }
+
+        return lastStep || state;
+    }
+
+    function getStepIndex(steps, state, lastStep, timeline) {
+        var effectiveState = inferDisplayStepState(state, lastStep, timeline);
+        effectiveState = stepStateAliases[effectiveState] || effectiveState;
         if (state === "queued") return -1;
         for (var i = 0; i < steps.length; i++) {
-            if (steps[i].states.indexOf(state) !== -1) return i;
+            if (steps[i].states.indexOf(effectiveState) !== -1) return i;
         }
         return -1;
     }
 
-    function renderSteps(scope, state) {
+    function renderSteps(scope, state, lastStep, timeline) {
         var steps = scopeSteps[scope] || scopeSteps["full"];
-        var currentIdx = getStepIndex(steps, state);
+        var currentIdx = getStepIndex(steps, state, lastStep, timeline);
         var container = document.getElementById("step-progress");
         if (!container) return;
 
@@ -156,22 +233,31 @@
             var step = steps[i];
             var isDone = currentIdx > i;
             var isCurrent = currentIdx === i;
-            var isFailed = state === "failed";
+            var isFailedStep = state === "failed" && isCurrent;
 
             // 圆点
             var dotClass = "";
             if (isDone) {
                 dotClass = "w-3 h-3 rounded-full bg-black";
+            } else if (isFailedStep) {
+                dotClass = "w-3 h-3 rounded-full bg-red-500";
             } else if (isCurrent) {
                 dotClass = "w-3 h-3 rounded-full border-2 border-black bg-white";
-                if (isFailed) dotClass = "w-3 h-3 rounded-full bg-red-500";
             } else {
                 dotClass = "w-3 h-3 rounded-full bg-fg-faint/40";
             }
 
+            var labelClass = "text-fg-faint";
+            if (isDone || isCurrent) {
+                labelClass = "text-fg-strong font-medium";
+            }
+            if (isFailedStep) {
+                labelClass = "text-red-600 font-medium";
+            }
+
             html += '<div class="flex flex-col items-center" style="flex:0 0 auto">';
             html += '<div class="' + dotClass + '"></div>';
-            html += '<div class="text-[11px] mt-1 ' + (isDone || isCurrent ? 'text-fg-strong font-medium' : 'text-fg-faint') + '">' + step.label + '</div>';
+            html += '<div class="text-[11px] mt-1 ' + labelClass + '">' + step.label + '</div>';
             html += '</div>';
 
             // 连线（最后一个不画）
@@ -337,14 +423,44 @@
         try {
             var data = await fetchJson("/api/tasks/" + encodeURIComponent(taskId));
             var scope = data.task_scope || "full";
+            var displayTitle = data.source_title || data.translated_title || data.source_url || taskId;
+            var displayStepState = inferDisplayStepState(data.state, data.last_step, data.timeline);
+            var translationProgress = typeof data.translation_progress === "number"
+                ? data.translation_progress + "%"
+                : "-";
+            var translationMeta = [];
+            var hasQcScore = data.qc_score !== null && data.qc_score !== undefined && data.qc_score !== "";
+            var hasQcDetails = typeof data.qc_details === "string" && data.qc_details.trim() !== "";
+            if (data.translation_task_id) {
+                translationMeta.push(data.translation_task_id);
+            }
+            if (translationProgress !== "-") {
+                translationMeta.push(translationProgress);
+            }
 
-            document.getElementById("task-state").textContent = data.state || "-";
-            document.getElementById("task-progress").textContent = String(data.progress || 0) + "%";
+            document.getElementById("task-title").textContent = displayTitle;
+            document.getElementById("task-state").textContent = stateLabels[data.state] || data.state || "-";
+            document.getElementById("task-progress").textContent = String(typeof data.progress === "number" ? data.progress : 0) + "%";
             document.getElementById("task-scope").textContent = scopeLabels[scope] || scope;
+            document.getElementById("task-language").textContent = (data.source_lang || "-") + " → " + (data.target_lang || "-");
             document.getElementById("task-created-at").textContent = formatTime(data.created_at);
             document.getElementById("task-updated-at").textContent = formatTime(data.updated_at);
             document.getElementById("task-duration").textContent = formatDuration(data.duration_seconds);
+            document.getElementById("task-last-step").textContent = data.state === "failed" && displayStepState && displayStepState !== "failed"
+                ? (stateLabels[displayStepState] || displayStepState) + "（失败）"
+                : (stateLabels[data.last_step] || stateLabels[displayStepState] || data.last_step || "-");
             document.getElementById("task-source-url").textContent = data.source_url || "-";
+
+            var translationSection = document.getElementById("translation-section");
+            if (data.translated_title || translationMeta.length > 0 || hasQcScore || hasQcDetails) {
+                translationSection.style.display = "block";
+                document.getElementById("task-translated-title").textContent = data.translated_title || "-";
+                document.getElementById("task-translation-meta").textContent = translationMeta.length > 0 ? translationMeta.join(" · ") : "-";
+                document.getElementById("task-qc-score").textContent = hasQcScore ? String(data.qc_score) + " 分" : "-";
+                document.getElementById("task-qc-details").textContent = data.qc_details || "-";
+            } else {
+                translationSection.style.display = "none";
+            }
 
             // 错误信息
             var errorSection = document.getElementById("error-section");
@@ -357,7 +473,7 @@
 
             renderPublishAccounts(data);
             // 步骤进度条
-            renderSteps(scope, data.state);
+            renderSteps(scope, data.state, data.last_step, data.timeline);
             await loadArtifacts();
             await loadPublishEvents();
         } catch (error) {

@@ -1,22 +1,35 @@
 # VideoFactory 配置模板
 # 复制此文件为 settings.yaml 并填入实际配置
 
-# KlicStudio配置（仅保留兼容字段，主流程不再依赖）
-klicstudio:
-  base_url: "http://127.0.0.1:8888"
-  timeout: 3600
-
 # LLM配置
 llm:
   base_url: "https://api.groq.com/openai/v1"
   api_key: "YOUR_API_KEY_HERE"
   model: "llama-3.3-70b-versatile"
 
+# 翻译配置
+translation:
+  provider: "volcengine_ark"
+  strict_json: false
+  local_llm:
+    enabled: false
+    base_url: "http://127.0.0.1:1234/v1"
+    api_key: ""
+    model: ""
+    timeout: 120
+  volcengine_ark:
+    enabled: false
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    api_key: ""
+    model: "doubao-seed-translation-250915"
+    timeout: 60
+  llm:
+    timeout: 60
+
 # ASR配置
 asr:
   provider: auto
   allow_fallback: true
-  allow_klicstudio_fallback: false
   allow_router_with_tts: true
   fallback_order:
     - youtube
@@ -58,6 +71,11 @@ tts:
     encoding: "mp3"
     sample_rate: 24000
     timeout: 120
+
+# FFmpeg配置
+ffmpeg:
+  path: ""
+  ffprobe_path: ""
 
 # 存储配置
 storage:

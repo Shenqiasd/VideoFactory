@@ -40,3 +40,13 @@ class BaseTranslator(ABC):
         """
         翻译单段文本。
         """
+
+
+def mask_secret(secret: str) -> str:
+    """脱敏显示敏感字段，便于日志诊断。"""
+    value = str(secret or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 6:
+        return "*" * len(value)
+    return f"{value[:3]}***{value[-2:]}"

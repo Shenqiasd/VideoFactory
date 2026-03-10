@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Groq Whisper API 代理
-解决KlicStudio硬编码model名"whisper-1"的问题
-将 whisper-1 → whisper-large-v3-turbo 转发给Groq
+将兼容 OpenAI Whisper 的 `whisper-1` 请求转发到 Groq `whisper-large-v3-turbo`
 
 用法: python3 scripts/groq_whisper_proxy.py
 服务启动在: http://127.0.0.1:8866

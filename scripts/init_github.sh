@@ -54,7 +54,7 @@ git commit -m "Initial commit: VideoFactory v0.1.0
 
 - 完整的翻译配音流程（YouTube → ASR → 翻译 → TTS）
 - ASR 路由（YouTube字幕/Whisper/火山引擎）
-- TTS 路由（KlicStudio/火山引擎）
+- TTS 路由（火山引擎）
 - 二次创作能力（长视频、短切片、封面、元数据）
 - 多平台发布调度器
 - Web 管理界面（任务/存储/发布/设置）

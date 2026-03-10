@@ -3,7 +3,7 @@
 ## A. 最小必跑（每次改动）
 1. 单元/接口/模板测试
 ```bash
-python3.11 -m pytest -q
+./.venv/bin/python -m pytest -q
 ```
 
 ## B. 服务联调（改动任务链路或页面时）
@@ -18,7 +18,6 @@ bash scripts/start_all.sh status
 curl -sS -m 5 http://127.0.0.1:9000/api/health
 curl -sS -m 3 http://127.0.0.1:8866/health
 curl -sS -m 3 http://127.0.0.1:8877/health
-curl -sS -m 3 "http://127.0.0.1:8888/api/capability/subtitleTask?taskId=test"
 ```
 
 3. 关键页面可达
@@ -42,6 +41,6 @@ curl -sS http://127.0.0.1:9000/api/tasks/<task_id>
 
 ## D. 通过标准
 - `pytest` 全绿
-- API/Worker/三代理服务可连通
+- API/Worker/当前代理服务可连通
 - 目标 scope 行为与预期一致
 - 无新增高优先级回归

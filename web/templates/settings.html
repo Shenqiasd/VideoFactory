@@ -30,45 +30,103 @@
             <div x-show="active === 'translation'" x-transition>
                 <h2 class="text-[15px] font-semibold text-fg-strong mb-5">翻译配置</h2>
                 <div class="space-y-4">
-                    <div class="rounded-2xl border border-border p-4 space-y-3">
+                    <div class="rounded-2xl border border-border p-4 space-y-4">
                         <h3 class="text-[13px] font-semibold text-fg-strong">翻译 Provider 配置</h3>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-[12px] text-fg-sub mb-1.5">翻译引擎</label>
                                 <select id="translation-provider" class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none">
-                                    <option value="llm">llm（现有）</option>
+                                    <option value="llm">llm（沿用全局配置）</option>
+                                    <option value="local_llm">local_llm（本地模型）</option>
                                     <option value="volcengine_ark">volcengine_ark（豆包翻译）</option>
                                 </select>
                             </div>
-                            <label class="flex items-center justify-between rounded-xl border border-border px-3 py-2 cursor-pointer">
-                                <span class="text-[13px] text-fg">启用火山方舟翻译</span>
-                                <input id="translation-volcengine-enabled" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
-                            </label>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-[12px] text-fg-sub mb-1.5">Ark Base URL</label>
-                                <input id="translation-volcengine-base-url" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3"
-                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
-                            </div>
-                            <div>
-                                <label class="block text-[12px] text-fg-sub mb-1.5">Ark API Key</label>
-                                <input id="translation-volcengine-api-key" type="password"
-                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            <div class="rounded-2xl bg-muted px-4 py-3 text-[12px] text-fg-sub">
+                                本地模型只替换字幕初翻、字幕补翻以及标题/描述翻译，不影响 ASR 与当前火山 TTS。
                             </div>
                         </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-[12px] text-fg-sub mb-1.5">Model / Endpoint ID</label>
-                                <input id="translation-volcengine-model" type="text" placeholder="doubao-seed-translation"
-                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+
+                        <div data-translation-provider-panel="llm" class="rounded-2xl bg-muted/60 p-4 space-y-2">
+                            <h4 class="text-[13px] font-semibold text-fg-strong">llm（兼容模式）</h4>
+                            <p class="text-[12px] text-fg-sub">
+                                当前模式直接复用全局 `llm.base_url / llm.api_key / llm.model`。如果你要把翻译单独切到本地模型，请改成 `local_llm`。
+                            </p>
+                        </div>
+
+                        <div data-translation-provider-panel="local_llm" class="hidden rounded-2xl border border-border bg-muted/40 p-4 space-y-3">
+                            <div class="flex items-start justify-between gap-4">
+                                <div>
+                                    <h4 class="text-[13px] font-semibold text-fg-strong">本地模型翻译</h4>
+                                    <p class="text-[12px] text-fg-sub mt-1">要求本地服务提供 OpenAI 兼容 `/chat/completions` 接口，适配 LM Studio、vLLM、Ollama 兼容网关。</p>
+                                </div>
+                                <label class="flex min-w-[180px] items-center justify-between rounded-xl border border-border px-3 py-2 cursor-pointer">
+                                    <span class="text-[13px] text-fg">启用本地翻译</span>
+                                    <input id="translation-local-enabled" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                                </label>
                             </div>
-                            <div>
-                                <label class="block text-[12px] text-fg-sub mb-1.5">timeout（秒）</label>
-                                <input id="translation-volcengine-timeout" type="number" min="1"
-                                       class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1.5">Base URL</label>
+                                    <input id="translation-local-base-url" type="text" placeholder="http://127.0.0.1:1234/v1"
+                                           class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1.5">API Key（可选）</label>
+                                    <input id="translation-local-api-key" type="password"
+                                           class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1.5">Model</label>
+                                    <input id="translation-local-model" type="text" placeholder="填写本地服务实际加载的模型名"
+                                           class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1.5">timeout（秒）</label>
+                                    <input id="translation-local-timeout" type="number" min="1"
+                                           class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
                             </div>
                         </div>
+
+                        <div data-translation-provider-panel="volcengine_ark" class="hidden rounded-2xl border border-border bg-muted/40 p-4 space-y-3">
+                            <div class="flex items-start justify-between gap-4">
+                                <div>
+                                    <h4 class="text-[13px] font-semibold text-fg-strong">火山方舟翻译</h4>
+                                    <p class="text-[12px] text-fg-sub mt-1">适合继续走 Ark 翻译服务，和本地模型配置互不影响。</p>
+                                </div>
+                                <label class="flex min-w-[180px] items-center justify-between rounded-xl border border-border px-3 py-2 cursor-pointer">
+                                    <span class="text-[13px] text-fg">启用火山方舟翻译</span>
+                                    <input id="translation-volcengine-enabled" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
+                                </label>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1.5">Ark Base URL</label>
+                                    <input id="translation-volcengine-base-url" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3"
+                                           class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1.5">Ark API Key</label>
+                                    <input id="translation-volcengine-api-key" type="password"
+                                           class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1.5">Model / Endpoint ID</label>
+                                    <input id="translation-volcengine-model" type="text" placeholder="doubao-seed-translation-250915"
+                                           class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1.5">timeout（秒）</label>
+                                    <input id="translation-volcengine-timeout" type="number" min="1"
+                                           class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="rounded-xl bg-muted p-3 space-y-2">
                             <div class="grid grid-cols-3 gap-2">
                                 <input id="translation-test-source-lang" type="text" value="en"
@@ -96,13 +154,11 @@
                                     <option value="youtube">youtube（仅字幕抓取）</option>
                                     <option value="volcengine">volcengine</option>
                                     <option value="whisper">whisper</option>
-                                    <option value="klicstudio">klicstudio（原流程）</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-[13px] font-medium text-fg-strong mb-1.5">TTS 提供方</label>
                                 <select id="tts-provider" class="w-full h-10 px-4 rounded-2xl border border-border bg-white text-[14px] text-fg-strong outline-none">
-                                    <option value="klicstudio">klicstudio</option>
                                     <option value="volcengine">volcengine</option>
                                 </select>
                             </div>
@@ -114,19 +170,16 @@
                                        class="w-full h-10 px-4 rounded-2xl border border-border bg-white text-[14px] text-fg-strong outline-none" />
                             </div>
                             <div>
-                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">TTS 降级顺序</label>
-                                <input id="tts-fallback-order" type="text" placeholder="volcengine,klicstudio"
-                                       class="w-full h-10 px-4 rounded-2xl border border-border bg-white text-[14px] text-fg-strong outline-none" />
+                                <label class="block text-[13px] font-medium text-fg-strong mb-1.5">TTS 链路</label>
+                                <div class="h-10 px-4 rounded-2xl border border-border bg-muted text-[13px] text-fg-sub flex items-center">
+                                    当前仅保留 volcengine 自管配音
+                                </div>
                             </div>
                         </div>
                         <div class="grid grid-cols-2 gap-3">
                             <label class="flex items-center justify-between rounded-xl border border-border bg-white px-3 py-2 cursor-pointer">
                                 <span class="text-[13px] text-fg">允许 ASR 自动降级</span>
                                 <input id="asr-allow-fallback" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
-                            </label>
-                            <label class="flex items-center justify-between rounded-xl border border-border bg-white px-3 py-2 cursor-pointer">
-                                <span class="text-[13px] text-fg">允许回退 KlicStudio</span>
-                                <input id="asr-allow-klic-fallback" type="checkbox" class="w-9 h-5 rounded-full appearance-none bg-fg-faint checked:bg-fg-strong transition cursor-pointer relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition checked:after:translate-x-4" />
                             </label>
                             <label class="flex items-center justify-between rounded-xl border border-border bg-white px-3 py-2 cursor-pointer">
                                 <span class="text-[13px] text-fg">TTS 任务也走 ASR 路由</span>
@@ -575,8 +628,16 @@
         return fallbackMessage;
     }
 
+    function toggleTranslationProviderPanels() {
+        const provider = byId('translation-provider')?.value || 'llm';
+        document.querySelectorAll('[data-translation-provider-panel]').forEach((panel) => {
+            panel.classList.toggle('hidden', panel.dataset.translationProviderPanel !== provider);
+        });
+    }
+
     function applyAsrTtsSettings(data) {
         const translation = data?.translation || {};
+        const localTranslation = translation.local_llm || {};
         const volcTranslation = translation.volcengine_ark || {};
         const asr = data?.asr || {};
         const tts = data?.tts || {};
@@ -586,18 +647,25 @@
 
         if (Object.keys(translation).length > 0) {
             setValue('translation-provider', translation.provider || 'llm');
+            if (Object.prototype.hasOwnProperty.call(localTranslation, 'enabled')) {
+                setChecked('translation-local-enabled', localTranslation.enabled);
+            }
+            setValue('translation-local-base-url', localTranslation.base_url || 'http://127.0.0.1:1234/v1');
+            setValue('translation-local-api-key', localTranslation.api_key || '');
+            setValue('translation-local-model', localTranslation.model || '');
+            setValue('translation-local-timeout', localTranslation.timeout || 120);
             if (Object.prototype.hasOwnProperty.call(volcTranslation, 'enabled')) {
                 setChecked('translation-volcengine-enabled', volcTranslation.enabled);
             }
             setValue('translation-volcengine-base-url', volcTranslation.base_url || 'https://ark.cn-beijing.volces.com/api/v3');
             setValue('translation-volcengine-api-key', volcTranslation.api_key || '');
-            setValue('translation-volcengine-model', volcTranslation.model || 'doubao-seed-translation');
+            setValue('translation-volcengine-model', volcTranslation.model || 'doubao-seed-translation-250915');
             setValue('translation-volcengine-timeout', volcTranslation.timeout || 60);
+            toggleTranslationProviderPanels();
         }
 
         setValue('asr-provider', asr.provider || 'auto');
         setChecked('asr-allow-fallback', asr.allow_fallback);
-        setChecked('asr-allow-klic-fallback', asr.allow_klicstudio_fallback);
         setChecked('asr-allow-router-with-tts', asr.allow_router_with_tts);
         setValue('asr-fallback-order', (asr.fallback_order || []).join(','));
         setChecked('asr-youtube-skip-download', asr.youtube_skip_download);
@@ -614,8 +682,7 @@
         setValue('asr-volcengine-ws-url', asrVolc.ws_url || '');
         setValue('asr-volcengine-timeout', asrVolc.timeout || 120);
 
-        setValue('tts-provider', tts.provider || 'klicstudio');
-        setValue('tts-fallback-order', (tts.fallback_order || []).join(','));
+        setValue('tts-provider', tts.provider || 'volcengine');
         if (Object.prototype.hasOwnProperty.call(ttsVolc, 'enabled')) {
             setChecked('tts-volcengine-enabled', ttsVolc.enabled);
         }
@@ -658,11 +725,18 @@
             translation: {
                 provider: byId('translation-provider')?.value || 'llm',
                 strict_json: true,
+                local_llm: {
+                    enabled: !!byId('translation-local-enabled')?.checked,
+                    base_url: byId('translation-local-base-url')?.value || 'http://127.0.0.1:1234/v1',
+                    api_key: byId('translation-local-api-key')?.value || '',
+                    model: byId('translation-local-model')?.value || '',
+                    timeout: readNumber('translation-local-timeout', 120),
+                },
                 volcengine_ark: {
                     enabled: !!byId('translation-volcengine-enabled')?.checked,
                     base_url: byId('translation-volcengine-base-url')?.value || 'https://ark.cn-beijing.volces.com/api/v3',
                     api_key: byId('translation-volcengine-api-key')?.value || '',
-                    model: byId('translation-volcengine-model')?.value || 'doubao-seed-translation',
+                    model: byId('translation-volcengine-model')?.value || 'doubao-seed-translation-250915',
                     timeout: readNumber('translation-volcengine-timeout', 60),
                 },
                 llm: {
@@ -672,7 +746,6 @@
             asr: {
                 provider: byId('asr-provider')?.value || 'auto',
                 allow_fallback: !!byId('asr-allow-fallback')?.checked,
-                allow_klicstudio_fallback: !!byId('asr-allow-klic-fallback')?.checked,
                 allow_router_with_tts: !!byId('asr-allow-router-with-tts')?.checked,
                 fallback_order: readCsvInputOrDefault('asr-fallback-order', ['youtube', 'volcengine', 'whisper']),
                 youtube_skip_download: !!byId('asr-youtube-skip-download')?.checked,
@@ -692,8 +765,8 @@
                 },
             },
             tts: {
-                provider: byId('tts-provider')?.value || 'klicstudio',
-                fallback_order: readCsvInputOrDefault('tts-fallback-order', ['volcengine', 'klicstudio']),
+                provider: byId('tts-provider')?.value || 'volcengine',
+                fallback_order: ['volcengine'],
                 volcengine: {
                     enabled: !!byId('tts-volcengine-enabled')?.checked,
                     appid: appid,
@@ -745,8 +818,20 @@
             return;
         }
         const provider = byId('translation-provider')?.value || 'llm';
+        const localBaseUrl = (byId('translation-local-base-url')?.value || '').trim();
+        const localModel = (byId('translation-local-model')?.value || '').trim();
+        const localApiKey = (byId('translation-local-api-key')?.value || '').trim();
         const volcApiKey = (byId('translation-volcengine-api-key')?.value || '').trim();
+        const useLocal = provider === 'local_llm';
         const useVolcengine = provider === 'volcengine_ark';
+        if (useLocal && !localBaseUrl) {
+            showToast('请填写本地翻译 Base URL', 'error');
+            return;
+        }
+        if (useLocal && !localModel) {
+            showToast('请填写本地翻译模型名', 'error');
+            return;
+        }
         if (useVolcengine && !volcApiKey) {
             showToast('请填写 Ark API Key', 'error');
             return;
@@ -757,11 +842,17 @@
             source_lang: byId('translation-test-source-lang')?.value || 'en',
             target_lang: byId('translation-test-target-lang')?.value || 'zh-CN',
         };
-        if (useVolcengine) {
+        if (useLocal) {
+            payload.enabled = !!byId('translation-local-enabled')?.checked || (!!localBaseUrl && !!localModel);
+            payload.base_url = localBaseUrl;
+            payload.api_key = localApiKey;
+            payload.model = localModel;
+            payload.timeout = readNumber('translation-local-timeout', 120);
+        } else if (useVolcengine) {
             payload.enabled = !!byId('translation-volcengine-enabled')?.checked || !!volcApiKey;
             payload.base_url = byId('translation-volcengine-base-url')?.value || 'https://ark.cn-beijing.volces.com/api/v3';
             payload.api_key = volcApiKey;
-            payload.model = byId('translation-volcengine-model')?.value || 'doubao-seed-translation';
+            payload.model = byId('translation-volcengine-model')?.value || 'doubao-seed-translation-250915';
             payload.timeout = readNumber('translation-volcengine-timeout', 60);
         }
         try {
@@ -913,6 +1004,8 @@
     window.resetPublishForm = resetPublishForm;
 
     document.addEventListener('DOMContentLoaded', () => {
+        toggleTranslationProviderPanels();
+        byId('translation-provider')?.addEventListener('change', toggleTranslationProviderPanels);
         loadAsrTtsSettings();
         loadStorageSettings();
         loadPublishSettings();

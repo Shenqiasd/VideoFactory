@@ -1,6 +1,6 @@
 """
 字幕补翻与质量校验。
-用于修复 KlicStudio 产出的 target_language_srt 仍为源语言的问题。
+用于修复初翻字幕仍保留源语言、或翻译覆盖率不足的问题。
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ import httpx
 
 from core.config import Config
 from translation import get_translator
+from translation.base import mask_secret
+from translation.volcengine_ark import VolcengineArkTranslator
 
 logger = logging.getLogger(__name__)
 
@@ -122,12 +124,23 @@ class SubtitleRepairer:
     def __init__(self):
         cfg = Config()
         translator = get_translator(cfg)
+        self.translator = translator
         translator_cfg = translator.runtime_config()
 
         self.translation_provider = translator_cfg.provider
+        self.translation_enabled = bool(getattr(translator, "enabled", True))
         self.api_base = translator_cfg.base_url
         self.api_key = translator_cfg.api_key
         self.model = translator_cfg.model
+        self.timeout = int(translator_cfg.timeout or 60)
+        logger.info(
+            "字幕补翻 Translator 已加载: provider=%s enabled=%s base_url=%s model=%s api_key=%s",
+            self.translation_provider,
+            self.translation_enabled,
+            self.api_base,
+            self.model,
+            mask_secret(self.api_key),
+        )
 
         self.min_zh_line_ratio = float(
             cfg.get("quality", "translation_min_zh_line_ratio", default=0.85)
@@ -146,9 +159,26 @@ class SubtitleRepairer:
 
         self._client: Optional[httpx.AsyncClient] = None
 
+    def _runtime_missing_reason(self) -> str:
+        if self.translation_provider == "local_llm":
+            if not self.translation_enabled:
+                return "本地翻译模型未启用"
+            if not self.api_base:
+                return "本地翻译模型缺少 base_url"
+            if not self.model:
+                return "本地翻译模型缺少 model"
+        elif self.translation_provider in {"llm", "volcengine_ark"}:
+            if not self.api_base:
+                return f"{self.translation_provider} 缺少 base_url"
+            if not self.api_key:
+                return f"{self.translation_provider} 缺少 api_key"
+            if not self.model:
+                return f"{self.translation_provider} 缺少 model"
+        return ""
+
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=60)
+            self._client = httpx.AsyncClient(timeout=self.timeout)
         return self._client
 
     async def close(self):
@@ -156,13 +186,19 @@ class SubtitleRepairer:
             await self._client.aclose()
             self._client = None
 
-    async def translate_lines(self, texts: Sequence[str], target_lang: str) -> List[str]:
+    async def translate_lines(
+        self,
+        texts: Sequence[str],
+        target_lang: str,
+        source_lang: str = "auto",
+    ) -> List[str]:
         """
         对外暴露的批量翻译接口（复用补翻同一套鲁棒逻辑）。
 
         Args:
             texts: 待翻译文本列表。
             target_lang: 目标语言代码。
+            source_lang: 源语言代码，供火山翻译 responses API 使用。
 
         Returns:
             List[str]: 翻译结果，长度与输入一致。
@@ -176,7 +212,7 @@ class SubtitleRepairer:
         out: List[str] = []
         for i in range(0, len(items), batch_size):
             chunk = items[i : i + batch_size]
-            translated = await self._translate_batch(chunk, target_lang)
+            translated = await self._translate_batch(chunk, target_lang, source_lang=source_lang)
             if len(translated) != len(chunk):
                 translated = list(translated[: len(chunk)]) + list(chunk[len(translated) :])
             out.extend(translated)
@@ -223,14 +259,28 @@ class SubtitleRepairer:
         unchanged_ratio = unchanged / total if total else 1.0
         return zh_ratio, unchanged_ratio, need_repair
 
-    async def _translate_batch(self, texts: Sequence[str], target_lang: str) -> List[str]:
+    async def _translate_batch(
+        self,
+        texts: Sequence[str],
+        target_lang: str,
+        source_lang: str = "auto",
+    ) -> List[str]:
         if not texts:
             return []
 
-        # 无可用 key 时直接回原文，后续由阈值拦截失败
-        if not self.api_key:
-            logger.warning("LLM API key 为空，无法执行补翻")
+        missing_reason = self._runtime_missing_reason()
+        if missing_reason:
+            if self.translation_provider == "local_llm":
+                raise RuntimeError(missing_reason)
+            logger.warning("%s，无法执行补翻", missing_reason)
             return list(texts)
+
+        if self.translation_provider == "volcengine_ark":
+            return await self._translate_batch_via_volcengine_responses(
+                texts,
+                source_lang=source_lang,
+                target_lang=target_lang,
+            )
 
         prompt = (
             "你是字幕翻译器。请把下面 JSON 数组中的每一项翻译成目标语言，"
@@ -313,12 +363,73 @@ class SubtitleRepairer:
         # 大批次在解析失败时自动拆分，避免整批回退为原文。
         if len(texts) > 1:
             mid = len(texts) // 2
-            left = await self._translate_batch(texts[:mid], target_lang)
-            right = await self._translate_batch(texts[mid:], target_lang)
+            left = await self._translate_batch(texts[:mid], target_lang, source_lang=source_lang)
+            right = await self._translate_batch(texts[mid:], target_lang, source_lang=source_lang)
             return left + right
+
+        if self.translation_provider == "local_llm":
+            raise RuntimeError(f"本地翻译模型调用失败: {last_error or 'unknown error'}")
 
         logger.warning("字幕补翻请求失败，回退原文: %s", last_error)
         return list(texts)
+
+    async def _translate_batch_via_volcengine_responses(
+        self,
+        texts: Sequence[str],
+        *,
+        source_lang: str,
+        target_lang: str,
+    ) -> List[str]:
+        client = await self._get_client()
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        limit = min(4, max(1, len(texts)))
+        semaphore = asyncio.Semaphore(limit)
+
+        async def _translate_one(text: str) -> str:
+            content = str(text or "").strip()
+            if not content:
+                return ""
+
+            last_error = ""
+            for attempt in range(self.max_retries + 1):
+                try:
+                    payload = VolcengineArkTranslator.build_translation_payload(
+                        model=self.model,
+                        text=content,
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                    )
+                    async with semaphore:
+                        resp = await client.post(
+                            f"{self.api_base.rstrip('/')}/responses",
+                            headers=headers,
+                            json=payload,
+                        )
+
+                    if resp.status_code == 429:
+                        wait_s = self._extract_retry_seconds(resp.text, default=2.0 + attempt * 1.5)
+                        last_error = f"HTTP 429, backoff {wait_s:.1f}s"
+                        await asyncio.sleep(wait_s)
+                        continue
+
+                    if resp.status_code != 200:
+                        last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                        continue
+
+                    translated = VolcengineArkTranslator.extract_output_text(resp.json())
+                    if translated:
+                        return translated
+                    last_error = "响应解析失败"
+                except Exception as exc:  # pragma: no cover
+                    last_error = str(exc)
+
+            raise RuntimeError(f"火山翻译 responses 调用失败: {last_error or 'unknown error'}")
+
+        translated = await asyncio.gather(*[_translate_one(text) for text in texts])
+        return [str(item or "").strip() for item in translated]
 
     @staticmethod
     def _extract_retry_seconds(message: str, default: float = 2.0) -> float:
@@ -396,6 +507,7 @@ class SubtitleRepairer:
 
     async def repair_if_needed(self, task, working_dir: Path) -> RepairResult:
         target_lang = getattr(task, "target_lang", "") or ""
+        source_lang = getattr(task, "source_lang", "") or "auto"
         if not target_lang.startswith("zh"):
             return RepairResult(
                 passed=True,
@@ -460,7 +572,11 @@ class SubtitleRepairer:
             for start in range(0, len(need_repair), effective_batch_size):
                 batch_indexes = need_repair[start:start + effective_batch_size]
                 batch_texts = [origin_lines[i] for i in batch_indexes]
-                translated = await self._translate_batch(batch_texts, target_lang)
+                translated = await self._translate_batch(
+                    batch_texts,
+                    target_lang,
+                    source_lang=source_lang,
+                )
 
                 for idx, translated_text in zip(batch_indexes, translated):
                     cleaned = (translated_text or "").strip()

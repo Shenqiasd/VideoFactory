@@ -130,7 +130,7 @@ logging.basicConfig(
 
 if __name__ == "__main__":
     import uvicorn
-    api_host = os.environ.get("VF_API_HOST", "localhost")
+    api_host = os.environ.get("VF_API_HOST", "127.0.0.1")
     api_port = int(os.environ.get("VF_API_PORT", "9000"))
     uvicorn.run(
         "api.server:app",

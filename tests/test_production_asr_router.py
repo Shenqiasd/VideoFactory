@@ -27,8 +27,6 @@ class NoopNotifier:
 
 
 class RouterSuccess:
-    allow_klicstudio_fallback = True
-
     def is_router_enabled(self) -> bool:
         return True
 
@@ -67,9 +65,14 @@ class RepairPassed:
     message = "ok"
 
 
-async def _translate_to_zh(texts, target_lang):
-    del target_lang
+async def _translate_to_zh(texts, target_lang, source_lang=None):
+    del target_lang, source_lang
     return [f"ZH:{text}" for text in texts]
+
+
+async def _translate_text_passthrough(text, source_lang, target_lang):
+    del source_lang, target_lang
+    return text if str(text).startswith("ZH:") else f"ZH:{text}"
 
 
 async def _repair_pass(task, working_dir):
@@ -94,6 +97,7 @@ async def test_step_translate_uses_asr_router_and_generates_artifacts(tmp_path):
     pipeline.asr_router = RouterSuccess()  # type: ignore[assignment]
     pipeline.subtitle_repairer.translate_lines = _translate_to_zh  # type: ignore[method-assign]
     pipeline.subtitle_repairer.repair_if_needed = _repair_pass  # type: ignore[method-assign]
+    pipeline._safe_translate_text = _translate_text_passthrough  # type: ignore[method-assign]
 
     working_dir = tmp_path / task.task_id
     working_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +167,7 @@ async def test_step_translate_with_tts_stays_in_self_managed_flow(tmp_path):
     pipeline.asr_router = RouterSuccess()  # type: ignore[assignment]
     pipeline.subtitle_repairer.translate_lines = _translate_to_zh  # type: ignore[method-assign]
     pipeline.subtitle_repairer.repair_if_needed = _repair_pass  # type: ignore[method-assign]
+    pipeline._safe_translate_text = _translate_text_passthrough  # type: ignore[method-assign]
 
     async def _fake_synthesize(**kwargs):
         output_path = Path(kwargs["output_path"])
@@ -189,4 +194,4 @@ async def test_step_translate_with_tts_stays_in_self_managed_flow(tmp_path):
     assert task.state == TaskState.QC_CHECKING.value
     assert task.tts_audio_path.endswith("tts_final_audio.mp3")
     assert task.translated_video_path.endswith("video_with_tts.mp4")
-    assert task.klic_task_id.startswith("selfhosted_")
+    assert task.translation_task_id.startswith("selfhosted_")

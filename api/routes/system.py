@@ -23,16 +23,17 @@ from core.runtime_settings import (
 from core.subtitle_style import normalize_subtitle_style
 from translation import SUPPORTED_TRANSLATION_PROVIDERS
 from translation.llm_translator import LLMTranslator
+from translation.local_llm import LocalLLMTranslator
 from translation.volcengine_ark import VolcengineArkTranslator
 from tts.volcengine_tts import VolcengineTTS, DEFAULT_VOLCENGINE_VOICES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-ALLOWED_ASR_PROVIDERS = {"auto", "youtube", "volcengine", "whisper", "klicstudio"}
-ALLOWED_ASR_FALLBACK_ITEMS = {"youtube", "volcengine", "whisper", "klicstudio"}
-ALLOWED_TTS_PROVIDERS = {"klicstudio", "volcengine"}
-ALLOWED_TTS_FALLBACK_ITEMS = {"volcengine", "klicstudio"}
+ALLOWED_ASR_PROVIDERS = {"auto", "youtube", "volcengine", "whisper"}
+ALLOWED_ASR_FALLBACK_ITEMS = {"youtube", "volcengine", "whisper"}
+ALLOWED_TTS_PROVIDERS = {"volcengine"}
+ALLOWED_TTS_FALLBACK_ITEMS = {"volcengine"}
 ALLOWED_TRANSLATION_PROVIDERS = set(SUPPORTED_TRANSLATION_PROVIDERS)
 
 
@@ -77,7 +78,6 @@ class ASRVolcengineSettings(BaseModel):
 class ASRSettingsRequest(BaseModel):
     provider: str = "auto"
     allow_fallback: bool = True
-    allow_klicstudio_fallback: bool = False
     allow_router_with_tts: bool = True
     fallback_order: list[str] = Field(default_factory=lambda: ["youtube", "volcengine", "whisper"])
     youtube_skip_download: bool = False
@@ -209,7 +209,7 @@ class TranslationVolcengineArkSettings(BaseModel):
     enabled: bool = False
     base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     api_key: str = ""
-    model: str = "doubao-seed-translation"
+    model: str = "doubao-seed-translation-250915"
     timeout: int = 60
 
     @field_validator("timeout")
@@ -217,6 +217,21 @@ class TranslationVolcengineArkSettings(BaseModel):
     def validate_timeout(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("translation.volcengine_ark.timeout 必须大于 0")
+        return value
+
+
+class TranslationLocalLLMSettings(BaseModel):
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:1234/v1"
+    api_key: str = ""
+    model: str = ""
+    timeout: int = 120
+
+    @field_validator("timeout")
+    @classmethod
+    def validate_timeout(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("translation.local_llm.timeout 必须大于 0")
         return value
 
 
@@ -234,6 +249,7 @@ class TranslationLLMSettings(BaseModel):
 class TranslationSettingsRequest(BaseModel):
     provider: str = "llm"
     strict_json: bool = True
+    local_llm: TranslationLocalLLMSettings = Field(default_factory=TranslationLocalLLMSettings)
     volcengine_ark: TranslationVolcengineArkSettings = Field(default_factory=TranslationVolcengineArkSettings)
     llm: TranslationLLMSettings = Field(default_factory=TranslationLLMSettings)
 
@@ -360,8 +376,7 @@ def _build_asr_defaults() -> dict[str, Any]:
     return {
         "provider": "auto",
         "allow_fallback": True,
-        "allow_klicstudio_fallback": True,
-        "allow_router_with_tts": False,
+        "allow_router_with_tts": True,
         "fallback_order": ["youtube", "volcengine", "whisper"],
         "youtube_skip_download": False,
         "youtube_preferred_langs": ["en", "en-US", "en-GB"],
@@ -383,8 +398,8 @@ def _build_asr_defaults() -> dict[str, Any]:
 
 def _build_tts_defaults() -> dict[str, Any]:
     return {
-        "provider": "klicstudio",
-        "fallback_order": ["volcengine", "klicstudio"],
+        "provider": "volcengine",
+        "fallback_order": ["volcengine"],
         "volcengine": {
             "enabled": False,
             "appid": "",
@@ -414,11 +429,18 @@ def _build_translation_defaults(cfg: Optional[Config] = None) -> dict[str, Any]:
     return {
         "provider": "llm",
         "strict_json": bool(config.get("llm", "strict_json", default=False)),
+        "local_llm": {
+            "enabled": False,
+            "base_url": "http://127.0.0.1:1234/v1",
+            "api_key": "",
+            "model": "",
+            "timeout": 120,
+        },
         "volcengine_ark": {
             "enabled": False,
             "base_url": "https://ark.cn-beijing.volces.com/api/v3",
             "api_key": "",
-            "model": "doubao-seed-translation",
+            "model": "doubao-seed-translation-250915",
             "timeout": 60,
         },
         "llm": {
@@ -468,6 +490,40 @@ def _normalize_tts_volcengine_config(tts_data: dict[str, Any]) -> dict[str, Any]
     return tts_data
 
 
+def _normalize_asr_config(asr_data: Any) -> dict[str, Any]:
+    merged = _deep_merge(_build_asr_defaults(), asr_data if isinstance(asr_data, dict) else {})
+    provider = str(merged.get("provider", "auto")).strip().lower()
+    if provider not in ALLOWED_ASR_PROVIDERS:
+        provider = "auto"
+    merged["provider"] = provider
+    merged.pop("allow_klicstudio_fallback", None)
+
+    fallback_order = []
+    for item in merged.get("fallback_order", []):
+        candidate = str(item or "").strip().lower()
+        if candidate in ALLOWED_ASR_FALLBACK_ITEMS and candidate not in fallback_order:
+            fallback_order.append(candidate)
+    merged["fallback_order"] = fallback_order or ["youtube", "volcengine", "whisper"]
+
+    preferred_langs = [
+        str(lang).strip()
+        for lang in merged.get("youtube_preferred_langs", [])
+        if str(lang).strip()
+    ]
+    merged["youtube_preferred_langs"] = preferred_langs or ["en", "en-US", "en-GB"]
+    return merged
+
+
+def _normalize_tts_config(tts_data: Any) -> dict[str, Any]:
+    merged = _deep_merge(_build_tts_defaults(), tts_data if isinstance(tts_data, dict) else {})
+    provider = str(merged.get("provider", "volcengine")).strip().lower()
+    if provider not in ALLOWED_TTS_PROVIDERS:
+        provider = "volcengine"
+    merged["provider"] = provider
+    merged["fallback_order"] = ["volcengine"]
+    return _normalize_tts_volcengine_config(merged)
+
+
 def _test_audio_root() -> Path:
     return Path("/tmp/video-factory/system-tests")
 
@@ -510,7 +566,6 @@ async def get_system_info():
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "machine": platform.machine(),
-        "klicstudio_url": config.get("klicstudio", "base_url", default=""),
         "r2_bucket": config.get("storage", "r2", "bucket", default=""),
     }
 
@@ -582,45 +637,12 @@ async def get_runtime_status():
     }
 
 
-@router.get("/klicstudio")
-async def check_klicstudio():
-    """检查KlicStudio连接状态"""
-    from production.klicstudio_client import KlicStudioClient
-
-    config = Config()
-    client = KlicStudioClient(
-        base_url=config.get("klicstudio", "base_url", default="http://127.0.0.1:8888"),
-    )
-
-    try:
-        klic_config = await client.get_config()
-        await client.close()
-
-        if klic_config:
-            return {
-                "connected": True,
-                "llm_model": klic_config.get("llm", {}).get("model", ""),
-                "tts_provider": klic_config.get("tts", {}).get("provider", ""),
-                "transcribe_provider": klic_config.get("transcribe", {}).get("provider", ""),
-            }
-        else:
-            return {"connected": False, "error": "无法获取配置"}
-
-    except Exception as e:
-        await client.close()
-        return {"connected": False, "error": str(e)}
-
-
 @router.get("/config")
 async def get_current_config():
     """获取当前配置（脱敏）"""
     config = Config()
 
     return {
-        "klicstudio": {
-            "base_url": config.get("klicstudio", "base_url", default=""),
-            "timeout": config.get("klicstudio", "timeout", default=3600),
-        },
         "storage": {
             "r2_bucket": config.get("storage", "r2", "bucket", default=""),
             "working_dir": config.get("storage", "local", "mac_working_dir", default=""),
@@ -656,9 +678,8 @@ async def get_asr_tts_settings():
     asr = cfg.get("asr", default={}) or {}
     tts = cfg.get("tts", default={}) or {}
     translation = cfg.get("translation", default={}) or {}
-    merged_asr = _deep_merge(_build_asr_defaults(), asr if isinstance(asr, dict) else {})
-    merged_tts = _deep_merge(_build_tts_defaults(), tts if isinstance(tts, dict) else {})
-    merged_tts = _normalize_tts_volcengine_config(merged_tts)
+    merged_asr = _normalize_asr_config(asr)
+    merged_tts = _normalize_tts_config(tts)
     merged_translation = _deep_merge(
         _build_translation_defaults(cfg),
         translation if isinstance(translation, dict) else {},
@@ -678,7 +699,8 @@ async def set_asr_tts_settings(request: ASRTTSSettingsRequest):
     """
     config_data = _read_yaml_config()
     config_data["asr"] = request.asr.model_dump()
-    config_data["tts"] = _normalize_tts_volcengine_config(request.tts.model_dump())
+    config_data["tts"] = _normalize_tts_config(request.tts.model_dump())
+    config_data.pop("klicstudio", None)
     if request.translation is not None:
         config_data["translation"] = request.translation.model_dump()
     _write_yaml_config(config_data)
@@ -714,7 +736,31 @@ async def test_translation(request: TranslationTestRequest):
     provider = request.provider.strip().lower()
     cfg = Config()
     try:
-        if provider == "volcengine_ark":
+        if provider == "local_llm":
+            runtime_cfg = cfg.get("translation", "local_llm", default={}) or {}
+            if not isinstance(runtime_cfg, dict):
+                runtime_cfg = {}
+            runtime_cfg = dict(runtime_cfg)
+
+            if request.base_url is not None:
+                runtime_cfg["base_url"] = request.base_url.strip()
+            if request.api_key is not None:
+                runtime_cfg["api_key"] = request.api_key.strip()
+            if request.model is not None:
+                runtime_cfg["model"] = request.model.strip()
+            if request.timeout is not None:
+                runtime_cfg["timeout"] = int(request.timeout)
+            if request.enabled is not None:
+                runtime_cfg["enabled"] = bool(request.enabled)
+            elif str(runtime_cfg.get("base_url", "")).strip() and str(runtime_cfg.get("model", "")).strip():
+                runtime_cfg["enabled"] = True
+
+            translator = LocalLLMTranslator(
+                config=_DictConfig({"translation": {"local_llm": runtime_cfg}})
+            )
+            if not translator.is_configured():
+                raise HTTPException(status_code=400, detail="本地翻译模型未配置完整或未启用")
+        elif provider == "volcengine_ark":
             runtime_cfg = cfg.get("translation", "volcengine_ark", default={}) or {}
             if not isinstance(runtime_cfg, dict):
                 runtime_cfg = {}
@@ -749,11 +795,14 @@ async def test_translation(request: TranslationTestRequest):
             source_lang=request.source_lang,
             target_lang=request.target_lang,
         )
+        runtime = translator.runtime_config()
         return {
             "success": True,
             "provider": provider,
             "source_lang": request.source_lang,
             "target_lang": request.target_lang,
+            "base_url": runtime.base_url,
+            "model": runtime.model,
             "result": result,
         }
     except HTTPException:

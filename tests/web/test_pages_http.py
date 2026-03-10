@@ -19,3 +19,14 @@ def test_pages_return_200(client, path: str, marker: str):
     assert response.status_code == 200
     assert "text/html" in response.headers.get("content-type", "")
     assert marker in response.text
+
+
+def test_pages_do_not_emit_template_response_deprecation(client, recwarn):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert not [
+        warning
+        for warning in recwarn
+        if "name is not the first parameter anymore" in str(warning.message)
+    ]

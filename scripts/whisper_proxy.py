@@ -2,14 +2,14 @@
 """
 本地Whisper API代理服务
 提供OpenAI兼容的 /v1/audio/transcriptions 接口
-KlicStudio可以通过这个代理使用本地Whisper模型
+供 VideoFactory 自管 ASR 链路或兼容 OpenAI Whisper 的客户端调用
 
 用法:
   1. pip install openai-whisper fastapi uvicorn python-multipart
   2. python scripts/whisper_proxy.py
 
 服务会在 http://127.0.0.1:8866 启动
-KlicStudio配置中设置:
+客户端配置示例:
   [transcribe.openai]
     base_url = "http://127.0.0.1:8866/v1"
     api_key = "local"
@@ -163,7 +163,7 @@ if __name__ == "__main__":
     print()
     print("API: http://127.0.0.1:8866/v1/audio/transcriptions")
     print()
-    print("KlicStudio配置:")
+    print("客户端配置示例:")
     print('  [transcribe.openai]')
     print('    base_url = "http://127.0.0.1:8866/v1"')
     print('    api_key = "local"')

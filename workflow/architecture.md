@@ -1,10 +1,10 @@
 # video-factory 架构现状（代码基线）
 
-最后更新：2026-03-09
+最后更新：2026-03-10
 
 ## 1) 分层结构
 - `src/core/`：配置、任务模型、任务存储、存储管理、通知、运行时心跳
-- `src/production/`：下载、KlicStudio 提交/轮询/产物下载、质检
+- `src/production/`：下载、自管 ASR/翻译/Volcengine TTS、字幕修复、质检
 - `src/factory/`：长视频、短切片、封面、元数据、图文、加工编排
 - `src/distribute/`：发布器与调度器（含失败重试与重放）
 - `workers/`：编排器主循环 + 调度器并行运行
@@ -17,6 +17,10 @@
 - 发布异常分支：`failed`
 - 发布部分成功分支：`partial_success`
 - 当前发布阶段支持按 `job_id` 做取消、重试、人工确认成功/失败。
+- 页面展示口径：
+  - 任务详情 / 任务列表 / dashboard 统一优先读取持久化 `task.progress`
+  - 翻译阶段 UI 字段统一为 `translation_task_id` / `translation_progress`
+  - 失败任务阶段展示依赖 `task.timeline` 回溯最近一个非失败步骤
 
 任务范围 `task_scope`：
 - `subtitle_only`：翻译后进入加工，生成“有字幕长视频、无配音发布链路”
@@ -26,7 +30,6 @@
 
 ## 3) 服务拓扑（本机）
 - API：`9000`
-- KlicStudio：`8888`
 - Groq Whisper 代理：`8866`
 - Edge-TTS 代理：`8877`
 - Worker：后台循环（心跳写入 `~/.video-factory/worker_heartbeat.json`）
@@ -63,20 +66,17 @@
 
 ## 5) 测试基线
 - 当前仓库测试覆盖 API 合约、页面/partials、运行时健康、调度器、生产异常分型、scope 编排等。
-- 基线命令：`python3.11 -m pytest -q`
+- 基线命令：`./.venv/bin/python -m pytest -q`
 - 发布模块补充回归：
-  - `python3.11 -m pytest -q tests/test_publish_scheduler.py`
-  - `python3.11 -m pytest -q tests/web/test_api_contract.py`
-  - `python3.11 -m pytest -q tests/e2e/test_frontend_playwright.py -k 'accounts_page_can_create_and_validate_account or publish_page_supports_cancel_retry_manual_and_partial_recovery'`
+  - `./.venv/bin/python -m pytest -q tests/test_publish_scheduler.py`
+  - `./.venv/bin/python -m pytest -q tests/web/test_api_contract.py`
+  - `./.venv/bin/python -m pytest -q tests/e2e/test_frontend_playwright.py -k 'accounts_page_can_create_and_validate_account or publish_page_supports_cancel_retry_manual_and_partial_recovery'`
 
 ## 6) 已识别的技术债（代码层面）
 1. 凭证明文风险：
    - `config/settings.yaml`
    - `scripts/groq_whisper_proxy.py`
-2. 页面数据一致性风险：
-   - `api/routes/pages.py` 的 `recent_completed_partial` 对时间字段按 ISO 解析，但任务时间戳是 float。
-   - `api/routes/pages.py` 使用 `target_platforms` 字段做过滤/展示，任务模型默认未持久化该字段。
-3. 模板兼容性风险：
-   - `api/routes/pages.py` 仍使用旧版 `TemplateResponse(name, context)` 调用顺序，测试中存在 deprecation warning。
-4. 运维可移植性风险：
-   - `scripts/start_all.sh` 中 KlicStudio 路径和 ffmpeg-full 路径写死为本机路径。
+2. 运维依赖门槛：
+   - 本地运行依赖 Python 3.11 虚拟环境；若未创建 `.venv` 或未设置 `VF_PYTHON_BIN`，服务与 E2E 不会启动。
+3. 配置迁移兼容：
+   - 历史 `tasks.json` 若仍保存 `klic_task_id` / `klic_progress`，加载时会自动迁移到 `translation_task_id` / `translation_progress`。

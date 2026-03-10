@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 def main():
     """启动FastAPI服务"""
-    api_host = os.environ.get("VF_API_HOST", "localhost")
-    api_port = int(os.environ.get("VF_API_PORT", "8087"))
+    api_host = os.environ.get("VF_API_HOST", "127.0.0.1")
+    api_port = int(os.environ.get("VF_API_PORT", "9000"))
 
     print("=" * 50)
     print("🚀 video-factory 启动中...")

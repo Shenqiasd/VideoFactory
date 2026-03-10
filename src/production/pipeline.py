@@ -16,11 +16,11 @@ from core.task import Task, TaskState, TaskStore, TaskProduct
 from core.storage import StorageManager, LocalStorage
 from core.notification import NotificationManager, NotifyLevel
 from core.config import Config
-from production.klicstudio_client import KlicStudioClient
 from production.subtitle_repair import SubtitleRepairer
 from source.ytdlp_runtime import build_ytdlp_base_cmd, has_yt_dlp_ejs
 from tts import VolcengineTTS
 from translation import get_translator
+from translation.base import mask_secret
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +215,6 @@ class ProductionPipeline:
         task_store: Optional[TaskStore] = None,
         storage: Optional[StorageManager] = None,
         local_storage: Optional[LocalStorage] = None,
-        klic_client: Optional[KlicStudioClient] = None,
         notifier: Optional[NotificationManager] = None,
     ):
         config = Config()
@@ -230,16 +229,21 @@ class ProductionPipeline:
             working_dir=config.get("storage", "local", "mac_working_dir", default="/tmp/video-factory/working"),
             output_dir=config.get("storage", "local", "mac_output_dir", default="/tmp/video-factory/output"),
         )
-        self.klic_client = klic_client or KlicStudioClient(
-            base_url=config.get("klicstudio", "base_url", default="http://127.0.0.1:8888"),
-            timeout=config.get("klicstudio", "timeout", default=3600),
-        )
         self.notifier = notifier or NotificationManager()
         self.qc = QualityChecker()
         self.subtitle_repairer = SubtitleRepairer()
         self.asr_router = ASRRouter(config=config)
         self.volcengine_tts = VolcengineTTS(config=config)
         self.translator = get_translator(config=config)
+        translator_cfg = self.translator.runtime_config()
+        logger.info(
+            "生产翻译 Translator 已加载: provider=%s enabled=%s base_url=%s model=%s api_key=%s",
+            translator_cfg.provider,
+            bool(getattr(self.translator, "enabled", True)),
+            translator_cfg.base_url,
+            translator_cfg.model,
+            mask_secret(translator_cfg.api_key),
+        )
 
     @staticmethod
     def classify_download_failure(error_msg: str, has_cookies: bool) -> tuple[str, str]:
@@ -260,24 +264,6 @@ class ProductionPipeline:
         if "http error 429" in normalized or "too many requests" in normalized:
             return "DOWNLOAD_RATE_LIMITED", "下载失败: 请求过于频繁，被目标平台限流"
         return "DOWNLOAD_EXEC_FAILED", f"下载失败: {error_msg[:200]}"
-
-    @staticmethod
-    def classify_klic_submit_failure(error_msg: str) -> tuple[str, str]:
-        """KlicStudio 提交失败分型，返回 (error_code, display_message)。"""
-        normalized = (error_msg or "").lower()
-        if (
-            "all connection attempts failed" in normalized
-            or "connection refused" in normalized
-            or "failed to connect" in normalized
-            or "cannot connect" in normalized
-            or "name or service not known" in normalized
-            or "temporary failure in name resolution" in normalized
-            or "timed out" in normalized
-        ):
-            return "KLIC_UNAVAILABLE", "KlicStudio 服务不可用，请检查 8888 端口并重启服务"
-        if error_msg:
-            return "KLIC_SUBMIT_REJECTED", f"KlicStudio拒绝任务: {error_msg[:200]}"
-        return "KLIC_SUBMIT_FAILED", "KlicStudio任务提交失败"
 
     def _mark_step(self, task: Task, step: str):
         """记录当前步骤，便于前端和诊断接口展示。"""
@@ -720,7 +706,11 @@ class ProductionPipeline:
             return False, "ASR_EMPTY_SUBTITLE", "ASR 未返回有效字幕"
 
         origin_lines = [self._entry_main_line(entry) for entry in origin_entries]
-        target_lines = await self.subtitle_repairer.translate_lines(origin_lines, task.target_lang)
+        target_lines = await self.subtitle_repairer.translate_lines(
+            origin_lines,
+            task.target_lang,
+            task.source_lang,
+        )
         if len(target_lines) != len(origin_entries):
             logger.warning(
                 "ASR 路由翻译数量不一致: origin=%s target=%s",
@@ -785,10 +775,6 @@ class ProductionPipeline:
         await self._populate_translated_metadata(task, origin_text=origin_text, target_text=target_text)
 
         if task.enable_tts:
-            tts_provider = str(self.config.get("tts", "provider", default="volcengine")).strip().lower()
-            if tts_provider != "volcengine":
-                return False, "TTS_PROVIDER_UNSUPPORTED", f"当前仅支持 volcengine TTS，实际配置为 {tts_provider or 'unknown'}"
-
             source_audio_path = task.source_local_path if (task.source_local_path and os.path.exists(task.source_local_path)) else None
             if not source_audio_path:
                 return False, "TTS_SOURCE_VIDEO_MISSING", "启用配音时必须先下载到本地源视频"
@@ -817,8 +803,8 @@ class ProductionPipeline:
 
         task.subtitle_path = str(bilingual_path)
         task.transcript_text = target_text
-        task.klic_progress = 100
-        task.klic_task_id = f"selfhosted_{asr_result.method}_{task.task_id}"
+        task.translation_progress = 100
+        task.translation_task_id = f"selfhosted_{asr_result.method}_{task.task_id}"
         task.progress = 70
         task.transition(TaskState.QC_CHECKING)
         self.task_store.update(task)
@@ -829,36 +815,6 @@ class ProductionPipeline:
             len(origin_entries),
         )
         return True, "", ""
-
-    async def _submit_klic_task_with_retry(self, task: Task, video_url: str) -> tuple[Optional[str], str]:
-        """
-        提交 KlicStudio 任务（带重试），返回 (task_id, last_error)。
-        """
-        max_attempts = int(Config().get("klicstudio", "submit_max_retries", default=3))
-        interval_seconds = int(Config().get("klicstudio", "submit_retry_interval", default=5))
-        last_error = ""
-
-        for attempt in range(1, max_attempts + 1):
-            task_id = await self.klic_client.submit_task(
-                url=video_url,
-                origin_lang=task.source_lang,
-                target_lang=task.target_lang,
-                bilingual=True,
-                enable_tts=task.enable_tts,
-                embed_subtitle_video_type=task.embed_subtitle_type,
-            )
-            if task_id:
-                return task_id, ""
-
-            last_error = getattr(self.klic_client, "last_error", "") or "unknown submit error"
-            logger.warning(
-                f"KlicStudio提交失败 ({attempt}/{max_attempts}): {last_error}"
-            )
-
-            if attempt < max_attempts:
-                await asyncio.sleep(interval_seconds)
-
-        return None, last_error
 
     async def run(self, task: Task) -> bool:
         """
@@ -884,7 +840,7 @@ class ProductionPipeline:
                 if not await self._step_upload_source(task, working_dir):
                     return False
 
-            # Step 3: KlicStudio翻译配音
+            # Step 3: 自管翻译配音
             if task.state in [TaskState.QUEUED.value, TaskState.UPLOADING_SOURCE.value,
                               TaskState.DOWNLOADED.value, TaskState.QC_FAILED.value]:
                 if not await self._step_translate(task, working_dir):
@@ -1091,7 +1047,7 @@ class ProductionPipeline:
         if not self.asr_router.is_router_enabled():
             self._fail_task(
                 task,
-                "ASR provider 未启用。请在设置中选择 auto/youtube/volcengine/whisper，而不是旧的 KlicStudio 模式",
+                "ASR provider 未启用。请在设置中选择 auto/youtube/volcengine/whisper",
                 "ASR_ROUTER_DISABLED",
             )
             return False
@@ -1106,118 +1062,6 @@ class ProductionPipeline:
             error_code or "SELF_HOSTED_TRANSLATION_FAILED",
         )
         return False
-
-    async def _poll_klic_progress(self, task: Task) -> tuple[Optional[Dict], Optional[str]]:
-        """轮询KlicStudio任务进度，返回 (result, error_code)。"""
-        max_wait = Config().get("klicstudio", "timeout", default=3600)
-        poll_interval = 15
-        elapsed = 0
-        consecutive_errors = 0
-        max_consecutive_errors = 10  # 连续10次获取不到状态则放弃
-
-        while elapsed < max_wait:
-            task_info = await self.klic_client.get_task_status(task.klic_task_id)
-
-            if not task_info:
-                # 网络异常（get_task_status返回None）
-                consecutive_errors += 1
-                logger.warning(f"无法获取KlicStudio任务状态 ({consecutive_errors}/{max_consecutive_errors}): {task.klic_task_id}")
-                if consecutive_errors >= max_consecutive_errors:
-                    logger.error(f"连续{max_consecutive_errors}次无法获取状态，放弃: {task.klic_task_id}")
-                    return None, "KLIC_STATUS_UNAVAILABLE"
-                await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
-                continue
-
-            consecutive_errors = 0  # 重置连续错误计数
-            status = task_info.get("status")
-            progress = task_info.get("process_percent", 0)
-
-            # 映射KlicStudio进度到整体进度（30-70%区间）
-            task.klic_progress = progress
-            task.progress = 30 + int(progress * 0.4)
-            self.task_store.update(task)
-
-            logger.info(f"📊 KlicStudio进度: {progress}% (任务: {task.klic_task_id})")
-
-            # 成功
-            if status == 2 or progress == 100:
-                return task_info, None
-
-            # 失败（status=3，包括KlicStudio返回的错误）
-            if status == 3:
-                error_msg = task_info.get("error_msg", "未知原因")
-                logger.error(f"KlicStudio任务失败: {task.klic_task_id}, 原因: {error_msg}")
-                return None, "KLIC_TASK_FAILED"
-
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-
-        logger.error(f"KlicStudio任务超时: {task.klic_task_id}")
-        return None, "KLIC_TIMEOUT"
-
-    async def _download_klic_outputs(self, task: Task, klic_task_id: str, working_dir: Path):
-        """从KlicStudio下载翻译产出物"""
-        output_files = [
-            ("bilingual_srt.srt", "bilingual_srt.srt"),
-            ("origin_language_srt.srt", "origin_language_srt.srt"),
-            ("target_language_srt.srt", "target_language_srt.srt"),
-        ]
-
-        # 如果启用了TTS
-        if task.enable_tts:
-            output_files.extend([
-                ("tts_final_audio.wav", "tts_final_audio.wav"),
-                ("output/video_with_tts.mp4", "output/video_with_tts.mp4"),
-            ])
-
-        # 嵌入字幕视频
-        if task.embed_subtitle_type == "horizontal":
-            output_files.append(("output/horizontal_embed.mp4", "output/horizontal_embed.mp4"))
-        elif task.embed_subtitle_type == "vertical":
-            output_files.append(("output/vertical_embed.mp4", "output/vertical_embed.mp4"))
-
-        downloaded_video_with_tts: Optional[Path] = None
-        downloaded_tts_audio: Optional[Path] = None
-
-        for remote_name, local_name in output_files:
-            remote_path = f"tasks/{klic_task_id}/{remote_name}"
-            local_path = working_dir / local_name
-
-            # 确保本地子目录存在
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-
-            success = await self.klic_client.download_file(remote_path, str(local_path))
-            if success:
-                logger.info(f"✅ 下载: {remote_name} → {local_path}")
-
-                # 记录关键路径
-                if "bilingual_srt" in remote_name:
-                    task.subtitle_path = str(local_path)
-                elif "video_with_tts" in remote_name:
-                    task.translated_video_path = str(local_path)
-                    downloaded_video_with_tts = local_path
-                elif "tts_final_audio" in remote_name:
-                    task.tts_audio_path = str(local_path)
-                    downloaded_tts_audio = local_path
-                elif "horizontal_embed" in remote_name or "vertical_embed" in remote_name:
-                    if not task.translated_video_path:
-                        task.translated_video_path = str(local_path)
-            else:
-                logger.warning(f"⚠️ 下载失败: {remote_name}")
-
-        if task.enable_tts:
-            await self._ensure_valid_translated_video(
-                task,
-                working_dir,
-                video_candidate=downloaded_video_with_tts,
-                audio_candidate=downloaded_tts_audio,
-            )
-
-        # 读取字幕文本
-        srt_path = working_dir / "target_language_srt.srt"
-        if srt_path.exists():
-            task.transcript_text = srt_path.read_text(encoding="utf-8", errors="ignore")
 
     async def _step_qc(self, task: Task, working_dir: Path) -> bool:
         """Step 4: 质检"""
@@ -1254,5 +1098,4 @@ class ProductionPipeline:
     async def close(self):
         """关闭资源"""
         await self.subtitle_repairer.close()
-        await self.klic_client.close()
         await self.notifier.close()

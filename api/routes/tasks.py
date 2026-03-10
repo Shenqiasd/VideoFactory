@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from pathlib import Path
 import hashlib
 
-from core.task import Task, TaskState, TaskStore, VALID_SCOPES, SCOPE_DEFAULTS
+from core.task import Task, TaskState, TaskStore, VALID_SCOPES, SCOPE_DEFAULTS, normalize_creation_config
 from core.config import Config
 from core.storage import StorageManager
 from core.runtime_settings import get_subtitle_style_defaults
@@ -70,6 +70,7 @@ class TaskCreateRequest(BaseModel):
     enable_article: Optional[bool] = Field(None, description="启用图文生成（可选，覆盖scope默认值）")
     embed_subtitle_type: Optional[str] = Field(None, description="字幕嵌入类型（可选，覆盖scope默认值）: horizontal/vertical/none")
     subtitle_style: Optional[dict] = Field(None, description="字幕样式（可选）")
+    creation_config: Optional[dict] = Field(None, description="创作配置（可选）")
     priority: int = Field(2, description="优先级: 0=紧急 1=高 2=普通 3=低")
 
 
@@ -85,6 +86,9 @@ class TaskResponse(BaseModel):
     last_step: str = ""
     task_scope: str = "full"
     subtitle_style: dict = Field(default_factory=dict)
+    creation_config: dict = Field(default_factory=dict)
+    creation_state: dict = Field(default_factory=dict)
+    creation_status: dict = Field(default_factory=dict)
     created_at: float
     updated_at: float
     products_count: int = 0
@@ -104,6 +108,9 @@ class TaskDetailResponse(BaseModel):
     last_step: str
     task_scope: str = "full"
     subtitle_style: dict = Field(default_factory=dict)
+    creation_config: dict = Field(default_factory=dict)
+    creation_state: dict = Field(default_factory=dict)
+    creation_status: dict = Field(default_factory=dict)
     retry_count: int
     created_at: float
     updated_at: float
@@ -114,8 +121,8 @@ class TaskDetailResponse(BaseModel):
     qc_details: str
     products: list
     timeline: list
-    klic_task_id: str
-    klic_progress: int
+    translation_task_id: str
+    translation_progress: int
     duration_seconds: float
     publish_accounts: dict = Field(default_factory=dict)
     publish_account_details: dict = Field(default_factory=dict)
@@ -296,7 +303,7 @@ def _collect_task_artifacts(task: Task) -> List[dict]:
         file_path = Path(normalized_path)
         exists = file_path.exists() and file_path.is_file()
         size_bytes = file_path.stat().st_size if exists else 0
-        # 过滤明显损坏的 KlicStudio 占位文件（例如 48B 的 video_with_tts.mp4）
+        # 过滤明显损坏的旧翻译链路占位文件（例如 48B 的 video_with_tts.mp4）
         if (
             exists
             and file_path.name == "video_with_tts.mp4"
@@ -428,6 +435,10 @@ async def create_task(request: TaskCreateRequest):
         enable_article=options["enable_article"],
         embed_subtitle_type=options["embed_subtitle_type"],
         subtitle_style=_resolve_subtitle_style(request.subtitle_style),
+        creation_config=normalize_creation_config(
+            request.creation_config,
+            enable_short_clips=options["enable_short_clips"],
+        ),
         priority=request.priority,
     )
 
@@ -488,6 +499,7 @@ async def create_task_compat(
         enable_article=options["enable_article"],
         embed_subtitle_type=options["embed_subtitle_type"],
         subtitle_style=subtitle_style,
+        creation_config=normalize_creation_config({}, enable_short_clips=options["enable_short_clips"]),
         priority=2,
     )
 
@@ -560,6 +572,7 @@ async def batch_create_tasks(
             enable_article=options["enable_article"],
             embed_subtitle_type=options["embed_subtitle_type"],
             subtitle_style=subtitle_style,
+            creation_config=normalize_creation_config({}, enable_short_clips=options["enable_short_clips"]),
             priority=2,
         )
         created_tasks.append(
@@ -617,6 +630,9 @@ async def list_tasks(state: Optional[str] = None, limit: int = 50):
             last_step=t.last_step,
             task_scope=getattr(t, "task_scope", "full"),
             subtitle_style=getattr(t, "subtitle_style", {}) or {},
+            creation_config=getattr(t, "creation_config", {}) or {},
+            creation_state=getattr(t, "creation_state", {}) or {},
+            creation_status=getattr(t, "creation_status", {}) or {},
             created_at=t.created_at,
             updated_at=t.updated_at,
             products_count=len(t.products),
@@ -658,6 +674,9 @@ async def list_completed_tasks():
             last_step=t.last_step,
             task_scope=getattr(t, "task_scope", "full"),
             subtitle_style=getattr(t, "subtitle_style", {}) or {},
+            creation_config=getattr(t, "creation_config", {}) or {},
+            creation_state=getattr(t, "creation_state", {}) or {},
+            creation_status=getattr(t, "creation_status", {}) or {},
             created_at=t.created_at,
             updated_at=t.updated_at,
             products_count=len(t.products),
@@ -781,6 +800,9 @@ async def get_task(task_id: str):
         last_step=task.last_step,
         task_scope=getattr(task, "task_scope", "full"),
         subtitle_style=getattr(task, "subtitle_style", {}) or {},
+        creation_config=getattr(task, "creation_config", {}) or {},
+        creation_state=getattr(task, "creation_state", {}) or {},
+        creation_status=getattr(task, "creation_status", {}) or {},
         retry_count=task.retry_count,
         created_at=task.created_at,
         updated_at=task.updated_at,
@@ -791,8 +813,8 @@ async def get_task(task_id: str):
         qc_details=task.qc_details,
         products=task.products,
         timeline=task.timeline,
-        klic_task_id=task.klic_task_id,
-        klic_progress=task.klic_progress,
+        translation_task_id=task.translation_task_id,
+        translation_progress=task.translation_progress,
         duration_seconds=task.duration_seconds,
         publish_accounts=publish_accounts,
         publish_account_details=publish_account_details,
