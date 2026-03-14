@@ -306,23 +306,11 @@ class CreationPipeline:
         self._persist(task)
 
         audio_source_path = self._resolve_audio_source(task, video_path)
-        try:
-            segments = await self.highlight_detector.detect(
-                video_path,
-                subtitle_path,
-                clip_count=int(config.get("clip_count", 5)),
-                min_duration=int(config.get("duration_min", 30)),
-                max_duration=int(config.get("duration_max", 180)),
-                audio_source_path=audio_source_path,
-            )
-        except Exception as exc:  # pragma: no cover - protective fallback
-            logger.warning("高光识别失败，使用 legacy 回退: %s", exc)
-            warnings.append(f"highlight_detector_failed: {exc}")
-            segments = []
-
-        if not segments:
+        highlight_strategy = str(config.get("highlight_strategy", "hybrid") or "hybrid").strip().lower()
+        segments: List[HighlightSegment] = []
+        if highlight_strategy == "legacy":
             result.used_fallback = True
-            task.mark_creation_stage("highlight_fallback", used_fallback=True)
+            task.mark_creation_stage("highlight_legacy", used_fallback=True)
             self._persist(task)
             segments = await self._fallback_segments(
                 video_path,
@@ -331,6 +319,33 @@ class CreationPipeline:
                 min_duration=int(config.get("duration_min", 30)),
                 max_duration=int(config.get("duration_max", 180)),
             )
+        else:
+            try:
+                segments = await self.highlight_detector.detect(
+                    video_path,
+                    subtitle_path,
+                    clip_count=int(config.get("clip_count", 5)),
+                    min_duration=int(config.get("duration_min", 30)),
+                    max_duration=int(config.get("duration_max", 180)),
+                    audio_source_path=audio_source_path,
+                    strategy=highlight_strategy,
+                )
+            except Exception as exc:  # pragma: no cover - protective fallback
+                logger.warning("高光识别失败，使用 legacy 回退: %s", exc)
+                warnings.append(f"highlight_detector_failed: {exc}")
+                segments = []
+
+            if not segments:
+                result.used_fallback = True
+                task.mark_creation_stage("highlight_fallback", used_fallback=True)
+                self._persist(task)
+                segments = await self._fallback_segments(
+                    video_path,
+                    subtitle_path,
+                    clip_count=int(config.get("clip_count", 5)),
+                    min_duration=int(config.get("duration_min", 30)),
+                    max_duration=int(config.get("duration_max", 180)),
+                )
 
         result.segments = segments
         task.update_creation_state(

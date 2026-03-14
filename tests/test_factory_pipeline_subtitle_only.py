@@ -71,13 +71,31 @@ async def test_subtitle_only_falls_back_to_source_video(monkeypatch, tmp_path):
         out_file.write_bytes(b"1" * 1_200_000)
         return str(out_file)
 
+    async def _fake_process_covers(task, video_path, output_dir):
+        captured["cover_video_path"] = video_path
+        out_dir = Path(output_dir) / "covers"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cover_file = out_dir / "horizontal.png"
+        cover_file.write_bytes(b"cover")
+        return {"horizontal": str(cover_file)}
+
+    async def _fake_process_metadata(task, transcript):
+        captured["transcript"] = transcript
+        return {"bilibili": {"description": "字幕简介" * 80}}
+
     async def _fake_record_products(task, long_video_path, clip_paths, cover_paths, metadata_map):
+        captured["recorded_long_video_path"] = long_video_path
+        captured["recorded_clip_paths"] = clip_paths
+        captured["recorded_cover_paths"] = cover_paths
+        captured["recorded_metadata_map"] = metadata_map
         return None
 
     async def _fake_upload_products(task, output_dir):
         return None
 
     monkeypatch.setattr(pipeline, "_process_long_video", _fake_process_long_video)
+    monkeypatch.setattr(pipeline, "_process_covers", _fake_process_covers)
+    monkeypatch.setattr(pipeline, "_process_metadata", _fake_process_metadata)
     monkeypatch.setattr(pipeline, "_record_products", _fake_record_products)
     monkeypatch.setattr(pipeline, "_upload_products", _fake_upload_products)
 
@@ -88,8 +106,15 @@ async def test_subtitle_only_falls_back_to_source_video(monkeypatch, tmp_path):
         enable_tts=False,
         source_local_path=str(source_video),
         subtitle_path=str(subtitle),
+        transcript_text="subtitle only transcript",
     )
 
     ok = await pipeline.run(task)
     assert ok is True
     assert captured["video_path"] == str(source_video)
+    assert captured["cover_video_path"] == str(source_video)
+    assert captured["transcript"] == "subtitle only transcript"
+    assert captured["recorded_long_video_path"].endswith("long_video.mp4")
+    assert captured["recorded_clip_paths"]["variants"] == []
+    assert captured["recorded_cover_paths"]["horizontal"].endswith("horizontal.png")
+    assert captured["recorded_metadata_map"]["bilibili"]["description"].startswith("字幕简介")

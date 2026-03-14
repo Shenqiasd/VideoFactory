@@ -237,3 +237,44 @@ async def test_factory_pipeline_does_not_require_review_without_short_clip_outpu
     assert [product for product in task.products if product.get("type") == "short_clip"] == []
     assert task.creation_status["review_required"] is False
     assert task.creation_status["review_status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_record_products_truncates_long_video_description_and_records_cover(tmp_path):
+    pipeline = FactoryPipeline(
+        task_store=_DummyStore(),
+        storage=SimpleNamespace(sync_to_r2=lambda *args, **kwargs: True),
+        local_storage=_DummyLocalStorage(tmp_path / "working", tmp_path / "output"),
+        notifier=_DummyNotifier(),
+    )
+
+    long_video = tmp_path / "long_video.mp4"
+    cover = tmp_path / "horizontal.png"
+    vertical_cover = tmp_path / "vertical.png"
+    long_video.write_bytes(b"1" * 1_200_000)
+    cover.write_bytes(b"cover")
+    vertical_cover.write_bytes(b"vertical-cover")
+
+    task = Task(
+        source_url="https://example.com/video",
+        state=TaskState.PROCESSING.value,
+        translated_title="规范项目名",
+        translated_description="备用简介 " * 80,
+    )
+
+    await pipeline._record_products(
+        task,
+        str(long_video),
+        CreationResult(),
+        {"horizontal": str(cover), "vertical": str(vertical_cover)},
+        {"bilibili": {"description": "平台简介 " * 80}},
+    )
+
+    long_video_products = [product for product in task.products if product.get("type") == "long_video"]
+    cover_products = [product for product in task.products if product.get("type") == "cover"]
+
+    assert len(long_video_products) == 1
+    assert len(cover_products) == 2
+    assert len(long_video_products[0]["description"]) <= 200
+    assert long_video_products[0]["description"] == (" ".join(("平台简介 " * 80).split()))[:200]
+    assert sorted(product["metadata"]["cover_type"] for product in cover_products) == ["horizontal", "vertical"]

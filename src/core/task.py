@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 import logging
 
+from core.project_naming import build_project_name
 from core.runtime_settings import get_subtitle_style_defaults
 from core.subtitle_style import normalize_subtitle_style
 
@@ -278,6 +279,7 @@ class Task:
     # 质检
     qc_score: float = 0.0
     qc_details: str = ""
+    global_review_report: Dict[str, Any] = field(default_factory=dict)
 
     # 产出物
     products: List[Dict] = field(default_factory=list)
@@ -544,6 +546,16 @@ class Task:
         """任务耗时（秒）"""
         end = self.completed_at or time.time()
         return end - self.created_at
+
+    @property
+    def project_name(self) -> str:
+        """任务展示名称：优先项目名称，其次原标题/路径。"""
+        return build_project_name(
+            translated_title=self.translated_title,
+            source_title=self.source_title,
+            source_url=self.source_url,
+            task_id=self.task_id,
+        )
 
     @property
     def is_active(self) -> bool:

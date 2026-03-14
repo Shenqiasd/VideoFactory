@@ -9,9 +9,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from core.project_naming import build_project_name
 from core.task import TaskStore, TaskState
 from core.config import Config
 from api.routes.tasks import (
+    _make_artifact_id,
     list_task_artifacts as api_list_task_artifacts,
     download_task_artifact as api_download_task_artifact,
 )
@@ -134,7 +136,77 @@ def get_task_platforms(task: Dict) -> List[str]:
 
 
 def get_task_title(task: Dict) -> str:
-    return task.get("source_title") or task.get("original_title") or task.get("source_url", "未命名任务")
+    return build_project_name(
+        translated_title=task.get("project_name", "") or task.get("translated_title", ""),
+        source_title=task.get("source_title", "") or task.get("original_title", ""),
+        source_url=task.get("source_url", ""),
+        task_id=task.get("task_id", ""),
+    )
+
+
+def get_task_initial(task: Dict) -> str:
+    title = get_task_title(task).strip()
+    return title[:1].upper() if title else "V"
+
+
+def _normalize_summary_text(text: Optional[str], limit: int = 200) -> str:
+    normalized = " ".join(str(text or "").split())
+    return normalized[:limit]
+
+
+def get_task_summary(task: Dict[str, Any]) -> str:
+    for product in get_task_products(task):
+        if product.get("type") != "long_video":
+            continue
+        summary = _normalize_summary_text(product.get("description"))
+        if summary:
+            return summary
+    return _normalize_summary_text(task.get("translated_description"))
+
+
+def _build_task_artifact_url(task_id: str, path: str, *, inline: bool = False) -> str:
+    artifact_id = _make_artifact_id(path)
+    suffix = "?inline=1" if inline else ""
+    return f"/api/tasks/{task_id}/artifacts/{artifact_id}/download{suffix}"
+
+
+def get_task_cover_preview_url(task: Dict[str, Any]) -> str:
+    cover_products = [
+        product
+        for product in get_task_products(task)
+        if isinstance(product, dict) and product.get("type") == "cover"
+    ]
+    if not cover_products:
+        return ""
+
+    def _sort_key(product: Dict[str, Any]) -> tuple[int, int]:
+        metadata = product.get("metadata") or {}
+        cover_type = str(metadata.get("cover_type", "")).lower()
+        order = {"horizontal": 0, "vertical": 1}
+        return order.get(cover_type, 99), 0 if product.get("local_path") else 1
+
+    primary_cover = sorted(cover_products, key=_sort_key)[0]
+    cover_path = primary_cover.get("local_path") or ""
+    if not cover_path and primary_cover.get("r2_path"):
+        cover_path = f"/__r2__/{primary_cover['r2_path']}"
+    if not cover_path:
+        return ""
+    return _build_task_artifact_url(task.get("task_id", ""), cover_path, inline=True)
+
+
+def enrich_creation_badges(task: Dict[str, Any]) -> None:
+    products = get_task_products(task)
+    creation_status = task.get("creation_status") or {}
+    clip_products = [p for p in products if isinstance(p, dict) and p.get("type") == "short_clip"]
+    cover_products = [p for p in products if isinstance(p, dict) and p.get("type") == "cover"]
+
+    task["has_long_video"] = any(isinstance(p, dict) and p.get("type") == "long_video" for p in products)
+    task["has_clips"] = bool(clip_products)
+    task["clips_count"] = len(clip_products)
+    task["has_article"] = any(isinstance(p, dict) and p.get("type") == "article" for p in products)
+    task["has_cover"] = bool(cover_products)
+    task["creation_review_pending"] = bool(creation_status.get("review_required")) and creation_status.get("review_status") == "pending"
+    task["creation_review_status"] = creation_status.get("review_status", "")
 
 
 def get_status_display(state: str) -> Dict[str, str]:
@@ -249,7 +321,23 @@ def get_scope_label(task: Dict) -> str:
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """Dashboard home page"""
-    return render_template(request, "dashboard.html")
+    stats_context = _build_stats_cards_context()
+    active_context = _build_active_tasks_context()
+    service_context = await _build_service_status_detail_context(request)
+    storage_context = _build_storage_overview_context()
+    recent_context = _build_recent_completed_context()
+    return render_template(
+        request,
+        "dashboard.html",
+        stats=stats_context["stats"],
+        active_tasks=active_context["tasks"],
+        total_active=active_context["total_active"],
+        services=service_context["services"],
+        last_check_time=service_context["last_check_time"],
+        r2=storage_context["r2"],
+        local=storage_context["local"],
+        recent_tasks=recent_context["tasks"],
+    )
 
 
 @router.get("/tasks/new", response_class=HTMLResponse)
@@ -261,7 +349,10 @@ async def new_task_page(request: Request):
 @router.get("/tasks", response_class=HTMLResponse)
 async def tasks_list_page(request: Request):
     """Task list page"""
-    return render_template(request, "tasks.html")
+    status = str(request.query_params.get("status", "all") or "all")
+    platform = str(request.query_params.get("platform", "all") or "all")
+    context = _build_task_list_context(status=status, platform=platform)
+    return render_template(request, "tasks.html", **context)
 
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
@@ -277,9 +368,9 @@ async def task_artifacts_alias(task_id: str):
 
 
 @router.get("/tasks/{task_id}/artifacts/{artifact_id}/download")
-async def task_artifact_download_alias(task_id: str, artifact_id: str):
+async def task_artifact_download_alias(task_id: str, artifact_id: str, inline: bool = False):
     """任务产物下载别名路由（兼容非 /api 前缀网关）。"""
-    return await api_download_task_artifact(task_id, artifact_id)
+    return await api_download_task_artifact(task_id, artifact_id, inline=inline)
 
 
 @router.get("/publish", response_class=HTMLResponse)
@@ -310,9 +401,7 @@ async def settings_page(request: Request):
 # HTMX Partial Routes
 # ============================================================================
 
-@router.get("/web/partials/stats_cards", response_class=HTMLResponse)
-async def stats_cards_partial(request: Request):
-    """Stats cards HTMX partial"""
+def _build_stats_cards_context() -> Dict[str, Any]:
     task_store = TaskStore()
     all_tasks = [t.to_dict() for t in task_store.list_all()]
 
@@ -325,31 +414,31 @@ async def stats_cards_partial(request: Request):
 
     success_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
 
-    stats = {
-        "total_tasks": total_tasks,
-        "active_tasks": active_tasks,
-        "completed_tasks": completed_tasks,
-        "pending_publish": pending_publish,
-        "success_rate": success_rate,
+    return {
+        "stats": {
+            "total_tasks": total_tasks,
+            "active_tasks": active_tasks,
+            "completed_tasks": completed_tasks,
+            "pending_publish": pending_publish,
+            "success_rate": success_rate,
+        }
     }
 
-    return render_template(request, "partials/stats_cards.html", stats=stats)
+
+@router.get("/web/partials/stats_cards", response_class=HTMLResponse)
+async def stats_cards_partial(request: Request):
+    """Stats cards HTMX partial"""
+    return render_template(request, "partials/stats_cards.html", **_build_stats_cards_context())
 
 
-@router.get("/web/partials/active_tasks", response_class=HTMLResponse)
-async def active_tasks_partial(request: Request):
-    """Active tasks HTMX partial"""
+def _build_active_tasks_context() -> Dict[str, Any]:
     task_store = TaskStore()
     all_tasks = [t.to_dict() for t in task_store.list_all()]
 
-    # Filter active tasks
     active_tasks = [t for t in all_tasks if is_task_active_for_ui(t)]
-
-    # Sort by created_at descending, limit to 5 for dashboard
     active_tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     display_tasks = active_tasks[:5]
 
-    # Enrich task data for display
     for task in display_tasks:
         status = get_status_display(task["state"])
         task["status_text"] = status["text"]
@@ -360,12 +449,21 @@ async def active_tasks_partial(request: Request):
         task["can_pause"] = task["state"] in [TaskState.TRANSLATING, TaskState.PROCESSING]
         task["can_cancel"] = task["state"] not in [TaskState.COMPLETED, TaskState.FAILED, TaskState.PARTIAL_SUCCESS]
         task["scope_label"] = get_scope_label(task)
+        task["project_name"] = get_task_title(task)
 
+    return {
+        "tasks": display_tasks,
+        "total_active": len(active_tasks),
+    }
+
+
+@router.get("/web/partials/active_tasks", response_class=HTMLResponse)
+async def active_tasks_partial(request: Request):
+    """Active tasks HTMX partial"""
     return render_template(
         request,
         "partials/active_tasks.html",
-        tasks=display_tasks,
-        total_active=len(active_tasks),
+        **_build_active_tasks_context(),
     )
 
 
@@ -423,9 +521,7 @@ async def service_status_sidebar_partial(request: Request):
     return HTMLResponse("\n".join(html_parts))
 
 
-@router.get("/web/partials/service_status_detail", response_class=HTMLResponse)
-async def service_status_detail_partial(request: Request):
-    """Service status detail HTMX partial"""
+async def _build_service_status_detail_context(request: Request) -> Dict[str, Any]:
     import httpx
     from datetime import datetime
 
@@ -466,27 +562,30 @@ async def service_status_detail_partial(request: Request):
             }
         )
 
-    last_check_time = datetime.now().strftime("%H:%M:%S")
+    return {
+        "services": services,
+        "last_check_time": datetime.now().strftime("%H:%M:%S"),
+    }
 
+
+@router.get("/web/partials/service_status_detail", response_class=HTMLResponse)
+async def service_status_detail_partial(request: Request):
+    """Service status detail HTMX partial"""
     return render_template(
         request,
         "partials/service_status_detail.html",
-        services=services,
-        last_check_time=last_check_time,
+        **(await _build_service_status_detail_context(request)),
     )
 
 
-@router.get("/web/partials/storage_overview", response_class=HTMLResponse)
-async def storage_overview_partial(request: Request):
-    """Storage overview HTMX partial"""
+def _build_storage_overview_context() -> Dict[str, Any]:
     import subprocess
     import shutil
 
     r2_used = 0
     r2_files = 0
-    r2_total = 10 * 1024 * 1024 * 1024  # 10GB free tier
+    r2_total = 10 * 1024 * 1024 * 1024
 
-    # Try rclone to get R2 usage
     try:
         result = subprocess.run(
             ["rclone", "size", "r2:videoflow", "--json"],
@@ -500,11 +599,10 @@ async def storage_overview_partial(request: Request):
     except Exception:
         pass
 
-    # Local storage via shutil
     local_path = Path.home() / ".video-factory" / "storage"
     local_used = 0
     local_files = 0
-    local_total = 200 * 1024 * 1024 * 1024  # ~200GB
+    local_total = 200 * 1024 * 1024 * 1024
     try:
         usage = shutil.disk_usage(str(local_path.parent))
         local_total = usage.total
@@ -514,45 +612,61 @@ async def storage_overview_partial(request: Request):
     except Exception:
         pass
 
-    r2_data = {
-        "used_formatted": format_bytes(r2_used),
-        "total_formatted": format_bytes(r2_total),
-        "usage_percent": min(100, int(r2_used / r2_total * 100)) if r2_total > 0 else 0,
-        "file_count": r2_files
+    return {
+        "r2": {
+            "used_formatted": format_bytes(r2_used),
+            "total_formatted": format_bytes(r2_total),
+            "usage_percent": min(100, int(r2_used / r2_total * 100)) if r2_total > 0 else 0,
+            "file_count": r2_files,
+        },
+        "local": {
+            "used_formatted": format_bytes(local_used),
+            "total_formatted": format_bytes(local_total),
+            "usage_percent": min(100, int(local_used / local_total * 100)) if local_total > 0 else 0,
+            "file_count": local_files,
+        },
     }
 
-    local_data = {
-        "used_formatted": format_bytes(local_used),
-        "total_formatted": format_bytes(local_total),
-        "usage_percent": min(100, int(local_used / local_total * 100)) if local_total > 0 else 0,
-        "file_count": local_files
-    }
 
+@router.get("/web/partials/storage_overview", response_class=HTMLResponse)
+async def storage_overview_partial(request: Request):
+    """Storage overview HTMX partial"""
     return render_template(
         request,
         "partials/storage_overview.html",
-        r2=r2_data,
-        local=local_data,
+        **_build_storage_overview_context(),
     )
 
 
 @router.get("/web/partials/task_list", response_class=HTMLResponse)
 async def task_list_partial(request: Request, status: str = "all", platform: str = "all"):
     """Task list HTMX partial"""
+    context = _build_task_list_context(status=status, platform=platform)
+
+    return render_template(
+        request,
+        "partials/task_list.html",
+        **context,
+    )
+
+
+def _build_task_list_context(*, status: str = "all", platform: str = "all") -> Dict[str, Any]:
+    resolved_status = status if status in {"all", "active", "completed", "failed"} else "all"
+    resolved_platform = platform or "all"
     task_store = TaskStore()
     all_tasks = [t.to_dict() for t in task_store.list_all()]
     now_ts = datetime.now().timestamp()
 
     # Filter by status
-    if status != "all":
-        if status == "active":
+    if resolved_status != "all":
+        if resolved_status == "active":
             all_tasks = [t for t in all_tasks if is_task_active_for_ui(t)]
         else:
-            all_tasks = [t for t in all_tasks if t["state"] == status]
+            all_tasks = [t for t in all_tasks if t["state"] == resolved_status]
 
     # Filter by platform
-    if platform != "all":
-        all_tasks = [t for t in all_tasks if platform in get_task_platforms(t)]
+    if resolved_platform != "all":
+        all_tasks = [t for t in all_tasks if resolved_platform in get_task_platforms(t)]
 
     # Enrich task data
     for task in all_tasks:
@@ -565,53 +679,52 @@ async def task_list_partial(request: Request, status: str = "all", platform: str
         task["is_active"] = is_task_active_for_ui(task)
         task["can_retry"] = task["state"] == TaskState.FAILED
         task["can_cancel"] = task["state"] not in [TaskState.COMPLETED, TaskState.FAILED, TaskState.PARTIAL_SUCCESS]
-        task["initial"] = task.get("source_title", "V")[0].upper() if task.get("source_title") else "V"
-        task["title"] = get_task_title(task)
+        task["project_name"] = get_task_title(task)
+        task["initial"] = get_task_initial(task)
+        task["title"] = task["project_name"]
         task["platforms"] = get_task_platforms(task)
         task["created_at_display"] = format_timestamp(task.get("created_at"))
         duration = duration_between(task.get("created_at"), now_ts)
         task["elapsed_time"] = format_duration(duration) if duration is not None else "-"
         task["scope_label"] = get_scope_label(task)
+        task["summary"] = get_task_summary(task)
+        task["cover_preview_url"] = get_task_cover_preview_url(task)
+        enrich_creation_badges(task)
 
-    return render_template(
-        request,
-        "partials/task_list.html",
-        tasks=all_tasks,
-        total_pages=1,
-        current_page=1,
-    )
+    return {
+        "tasks": all_tasks,
+        "total_pages": 1,
+        "current_page": 1,
+        "status": resolved_status,
+        "platform": resolved_platform,
+    }
 
 
-@router.get("/web/partials/recent_completed", response_class=HTMLResponse)
-async def recent_completed_partial(request: Request):
-    """Recent completed tasks HTMX partial"""
+def _build_recent_completed_context() -> Dict[str, Any]:
     task_store = TaskStore()
     all_tasks = [t.to_dict() for t in task_store.list_all()]
 
-    # Filter completed tasks
     completed_tasks = [t for t in all_tasks if t["state"] == TaskState.COMPLETED]
-
-    # Sort by completed_at descending, limit to 10
     completed_tasks.sort(key=lambda x: parse_timestamp(x.get("updated_at")) or 0, reverse=True)
     recent_tasks = completed_tasks[:10]
 
-    # Enrich task data
     for task in recent_tasks:
         task["completed_at"] = format_timestamp(task.get("updated_at"))
         duration = duration_between(task.get("created_at"), task.get("updated_at"))
         task["duration"] = format_duration(duration) if duration is not None else "未知"
         task["platforms"] = get_task_platforms(task) or ["未设置"]
+        task["project_name"] = get_task_title(task)
         task["display_title"] = get_task_title(task)
-
-        # Product info
-        products = get_task_products(task)
-        task["has_long_video"] = any(p.get("type") == "long_video" for p in products)
-        task["has_clips"] = any(p.get("type") == "short_clip" for p in products)
-        task["clips_count"] = len([p for p in products if p.get("type") == "short_clip"])
-        task["has_article"] = any(p.get("type") == "article" for p in products)
+        enrich_creation_badges(task)
         task["published"] = task.get("state") == TaskState.COMPLETED and task.get("published", False)
 
-    return render_template(request, "partials/recent_completed.html", tasks=recent_tasks)
+    return {"tasks": recent_tasks}
+
+
+@router.get("/web/partials/recent_completed", response_class=HTMLResponse)
+async def recent_completed_partial(request: Request):
+    """Recent completed tasks HTMX partial"""
+    return render_template(request, "partials/recent_completed.html", **_build_recent_completed_context())
 
 
 @router.get("/web/partials/publish_stats", response_class=HTMLResponse)
@@ -640,6 +753,8 @@ async def publish_queue_partial(request: Request, platform: str = "all"):
 
     scheduler = get_scheduler()
     db = Database()
+    task_store = TaskStore()
+    task_map = {task.task_id: task.to_dict() for task in task_store.list_all()}
     all_jobs = [
         j.to_dict()
         for j in scheduler._queue
@@ -675,8 +790,11 @@ async def publish_queue_partial(request: Request, platform: str = "all"):
         status_info = status_map.get(job.get("status", "pending"), status_map["pending"])
         job["status_text"] = status_info["text"]
         job["status_class"] = status_info["class"]
+        task_info = task_map.get(job.get("task_id", ""), {})
+        project_name = get_task_title(task_info) if task_info else ""
         job["task_title"] = (
-            job.get("metadata", {}).get("title")
+            project_name
+            or job.get("metadata", {}).get("title")
             or job.get("product", {}).get("title")
             or job.get("task_id", "")[:8]
         )

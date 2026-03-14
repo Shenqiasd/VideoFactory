@@ -1,11 +1,12 @@
 # video-factory 架构现状（代码基线）
 
-最后更新：2026-03-10
+最后更新：2026-03-13
 
 ## 1) 分层结构
 - `src/core/`：配置、任务模型、任务存储、存储管理、通知、运行时心跳
 - `src/production/`：下载、自管 ASR/翻译/Volcengine TTS、字幕修复、质检
 - `src/factory/`：长视频、短切片、封面、元数据、图文、加工编排
+- `src/creation/`：高光提取、主体检测、智能裁剪、字幕/转场/BGM 组合成片
 - `src/distribute/`：发布器与调度器（含失败重试与重放）
 - `workers/`：编排器主循环 + 调度器并行运行
 - `api/routes/`：任务、生产、加工、分发、系统、Web 页面/partials
@@ -28,6 +29,19 @@
 - `dub_and_copy`：翻译配音 + 加工后完成（跳过发布）
 - `full`：全流程到发布
 
+创作配置与创作状态：
+- 创建页会在 `scope=dub_and_copy/full` 下展开“创作配置”面板，配置项统一写入 `creation_config`
+- 任务详情页通过 `GET /api/tasks/{task_id}/creation-summary` 读取前端友好的创作摘要，展示高光片段、裁剪策略、平台变体、封面与审核动作
+- 创作审核沿用 `creation_status.review_required / review_status` 作为发布门禁事实来源
+- 详情页审核操作调用 `/api/factory/review/approve` 与 `/api/factory/review/reject`，审核通过后发布链路可继续推进
+- 任务列表/最近完成列表会展示轻量 creation badges（切片数量 / 待审核 / 已出封面）
+
+创作策略现状：
+- `highlight_strategy=hybrid`：字幕语义 + scene/audio 混合打分
+- `highlight_strategy=semantic`：仅按语义分数选段，不叠加 scene/audio
+- `highlight_strategy=legacy`：直接走旧 `ShortClipExtractor` 回退逻辑
+- 封面生成现支持 horizontal + vertical 两类输出，优先使用 YouTube 原始缩略图，失败时回退关键帧抽取
+
 ## 3) 服务拓扑（本机）
 - API：`9000`
 - Groq Whisper 代理：`8866`
@@ -35,6 +49,11 @@
 - Worker：后台循环（心跳写入 `~/.video-factory/worker_heartbeat.json`）
 - 下载运行时：`yt-dlp` 作为 Python 依赖安装到项目 `.venv`，下载命令优先解析当前运行时目录下的 `yt-dlp`
 - 源视频上传：R2 / `rclone` 仅用于增强型回传；本地自管链路在上传失败时继续使用 `source_local_path`
+- YouTube ASR：优先 `youtube-transcript-api`，为空时回退 `yt-dlp` 自动字幕，再继续 Volcengine / Whisper 降级
+- 自动字幕规范化：`yt-dlp` 回退优先读取 `srv3` 并清洗滚动重复 cue，避免上游字幕换行滚动导致逐行翻译重复
+- 字幕主翻译：在 `ProductionPipeline` 中先用 `SentenceRegrouper` 将连续碎片 cue 合并成 sentence group，再翻译并投影回原 cue 数量，降低逐行碎片翻译的语义断裂
+- 字幕补翻：若火山逐行翻译后仍残留纯英文碎片句，`SubtitleRepairer` 会带上前后文做二次定点补翻，再写回 `target_language_srt.srt` / `bilingual_srt.srt`
+- 质检规则：除中文覆盖率、未翻译占比外，额外拦截纯英文残留行，避免字幕仍有英文漏翻却拿到 `qc_score=100`
 
 ## 4) 当前发布系统实现现状
 - 发布入口：
@@ -63,16 +82,16 @@
   - 任务状态会根据全局结果进入 `completed / partial_success / failed`
 - 页面可观测性：
   - 发布管理页显示队列、账号状态、最近事件
-  - 任务详情页显示账号绑定和该任务的发布事件流
-  - 新建任务页会前置校验平台账号是否可用
+  - 任务详情页显示账号绑定、发布事件流，以及创作结果/创作审核操作
+  - 新建任务页会前置校验平台账号是否可用，并支持创作配置提交
 
 ## 5) 测试基线
 - 当前仓库测试覆盖 API 合约、页面/partials、运行时健康、调度器、生产异常分型、scope 编排等。
 - 基线命令：`./.venv/bin/python -m pytest -q`
-- 发布模块补充回归：
-  - `./.venv/bin/python -m pytest -q tests/test_publish_scheduler.py`
-  - `./.venv/bin/python -m pytest -q tests/web/test_api_contract.py`
-  - `./.venv/bin/python -m pytest -q tests/e2e/test_frontend_playwright.py -k 'accounts_page_can_create_and_validate_account or publish_page_supports_cancel_retry_manual_and_partial_recovery'`
+- 发布/创作模块补充回归：
+  - `./.venv/bin/python -m pytest -q tests/test_highlight_detector.py tests/test_cover_generator.py tests/test_factory_pipeline_creation.py tests/test_creation_review_gate.py`
+  - `./.venv/bin/python -m pytest -q tests/web/test_api_contract.py tests/web/test_pages_http.py`
+  - `./.venv/bin/python -m pytest -q tests/e2e/test_frontend_playwright.py`
 
 ## 6) 已识别的技术债（代码层面）
 1. 凭证明文风险：

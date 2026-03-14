@@ -303,12 +303,13 @@ def test_task_detail_page_renders_translation_and_failed_step_context(live_serve
     )
 
     page.goto(f"{live_server}/tasks/{task_id}", wait_until="domcontentloaded")
-    page.locator("#task-title", has_text="详情失败任务").wait_for(timeout=3000)
+    page.locator("#task-title", has_text="失败任务中文标题").wait_for(timeout=3000)
     page.wait_for_timeout(300)
 
     assert page.locator("#task-state").text_content() == "失败"
     assert page.locator("#task-last-step").text_content() == "翻译中（失败）"
     assert page.locator("#task-translated-title").text_content() == "失败任务中文标题"
+    assert page.locator("#task-source-title-display").text_content() == "详情失败任务"
     assert "selfhosted_whisper_vf_e2e_failed_detail" in page.locator("#task-translation-meta").text_content()
     assert "67%" in page.locator("#task-translation-meta").text_content()
 
@@ -360,6 +361,54 @@ def _seed_ready_publish_task(home_dir: Path, task_id: str, title: str):
             "description": "desc",
             "tags": ["tag"],
         }
+    ]
+    store.update(task)
+
+
+def _seed_creation_review_task(home_dir: Path, task_id: str, title: str):
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+    from core.task import Task, TaskState, TaskStore
+
+    store = TaskStore(store_path=str(home_dir / ".video-factory" / "tasks.json"))
+    task = Task(task_id=task_id, source_url="https://example.com/video", source_title=title)
+    task.state = TaskState.READY_TO_PUBLISH.value
+    task.creation_state = {
+        "stage": "completed",
+        "status": "completed",
+        "segments_total": 1,
+        "variants_total": 1,
+        "used_fallback": False,
+        "selected_segments": [
+            {
+                "segment_id": "seg_001",
+                "title": "知识点片段 1",
+                "start": 12.0,
+                "end": 42.0,
+                "duration": 30.0,
+                "crop_track": {"strategy": "yolo", "focus_class": "person"},
+            }
+        ],
+    }
+    task.creation_status = {
+        "review_required": True,
+        "review_status": "pending",
+        "status": "completed",
+    }
+    task.products = [
+        {
+            "type": "short_clip",
+            "platform": "douyin",
+            "local_path": "/tmp/seg001_douyin.mp4",
+            "title": "知识点片段 1 · douyin",
+            "metadata": {"segment_id": "seg_001", "review_status": "pending"},
+        },
+        {
+            "type": "cover",
+            "platform": "all",
+            "local_path": "/tmp/cover_horizontal.jpg",
+            "title": "横版封面",
+            "metadata": {"cover_type": "horizontal"},
+        },
     ]
     store.update(task)
 
@@ -448,3 +497,31 @@ def test_publish_page_supports_cancel_retry_manual_and_partial_recovery(live_ser
 
     completed_state = _wait_task_state(page, live_server, partial_task_id, "completed")
     assert completed_state["error_message"] == ""
+
+
+
+def test_task_detail_supports_creation_review_actions(live_server, live_server_home, browser_page):
+    page = browser_page
+    task_id = "vf_e2e_creation_review"
+    _seed_creation_review_task(live_server_home, task_id, "创作审核流程")
+
+    page.goto(f"{live_server}/tasks/{task_id}", wait_until="domcontentloaded")
+    page.locator("#creation-summary").wait_for()
+    assert page.locator("text=创作结果").count() > 0
+    assert page.locator("text=创作审核").count() > 0
+    assert page.locator("text=知识点片段 1").count() > 0
+
+    page.get_by_role("button", name="通过审核").click()
+
+    deadline = time.time() + 8.0
+    while time.time() < deadline:
+        response = page.request.get(f"{live_server}/api/tasks/{task_id}")
+        if response.ok and response.json().get("creation_status", {}).get("review_status") == "approved":
+            break
+        page.wait_for_timeout(200)
+    else:
+        raise AssertionError("创作审核状态未更新为 approved")
+
+    page.reload(wait_until="domcontentloaded")
+    page.locator("#creation-review-status").wait_for()
+    assert page.locator("#creation-review-status").inner_text() == "已通过"

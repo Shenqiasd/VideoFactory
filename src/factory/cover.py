@@ -4,11 +4,18 @@
 - 支持横版/竖版封面
 """
 import asyncio
-import json
+import mimetypes
 import logging
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from urllib.parse import parse_qs, urlparse
+
+import httpx
+
+from source.downloader import VideoDownloader
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +28,101 @@ class CoverGenerator:
 
     def __init__(self, ffmpeg_path: str = "ffmpeg"):
         self.ffmpeg = ffmpeg_path
+
+    @staticmethod
+    def _prepare_output_dir(output_dir: str):
+        path = Path(output_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        for child in path.iterdir():
+            if child.is_file() or child.is_symlink():
+                child.unlink(missing_ok=True)
+            elif child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+
+    @staticmethod
+    def _extract_youtube_video_id(source_url: str) -> str:
+        parsed = urlparse(str(source_url or "").strip())
+        host = parsed.netloc.lower()
+        if "youtu.be" in host:
+            return parsed.path.strip("/").split("/")[0]
+        if "youtube.com" in host:
+            video_id = parse_qs(parsed.query).get("v", [""])[0].strip()
+            if video_id:
+                return video_id
+            parts = [part for part in parsed.path.split("/") if part]
+            if len(parts) >= 2 and parts[0] in {"embed", "shorts", "live", "watch"}:
+                return parts[1].strip()
+        return ""
+
+    @classmethod
+    def _is_youtube_url(cls, source_url: str) -> bool:
+        return bool(cls._extract_youtube_video_id(source_url))
+
+    @staticmethod
+    def _thumbnail_suffix(url: str, content_type: str) -> str:
+        suffix = Path(urlparse(url).path).suffix.lower()
+        if suffix in {".jpg", ".jpeg", ".png", ".webp"}:
+            return suffix
+        guessed = mimetypes.guess_extension((content_type or "").split(";")[0].strip().lower()) or ""
+        if guessed in {".jpe", ".jpeg"}:
+            return ".jpg"
+        if guessed in {".jpg", ".png", ".webp"}:
+            return guessed
+        return ".jpg"
+
+    async def _download_source_thumbnail(self, source_url: str, output_dir: str) -> Optional[str]:
+        if not self._is_youtube_url(source_url):
+            return None
+
+        candidates: List[str] = []
+        try:
+            info = await VideoDownloader().get_video_info(source_url, timeout=60)
+            thumbnail = str((info or {}).get("thumbnail") or "").strip()
+            if thumbnail:
+                candidates.append(thumbnail)
+        except Exception as exc:
+            logger.warning("获取 YouTube 缩略图信息失败，尝试 CDN 回退: %s", exc)
+
+        video_id = self._extract_youtube_video_id(source_url)
+        if video_id:
+            candidates.extend(
+                [
+                    f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
+                    f"https://i.ytimg.com/vi/{video_id}/sddefault.jpg",
+                    f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                    f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+                    f"https://i.ytimg.com/vi/{video_id}/default.jpg",
+                ]
+            )
+
+        seen = set()
+        unique_candidates = []
+        for url in candidates:
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            unique_candidates.append(url)
+
+        if not unique_candidates:
+            return None
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            for thumbnail_url in unique_candidates:
+                try:
+                    response = await client.get(thumbnail_url)
+                except Exception as exc:
+                    logger.warning("下载缩略图失败: %s", exc)
+                    continue
+                content_type = response.headers.get("content-type", "")
+                if response.status_code != 200 or not response.content or not content_type.startswith("image/"):
+                    continue
+                suffix = self._thumbnail_suffix(thumbnail_url, content_type)
+                cover_path = Path(output_dir) / f"cover_horizontal{suffix}"
+                cover_path.write_bytes(response.content)
+                logger.info("🖼️ 使用 YouTube 原始缩略图作为封面: %s", thumbnail_url)
+                return str(cover_path)
+
+        return None
 
     async def extract_keyframes(
         self,
@@ -210,6 +312,7 @@ class CoverGenerator:
         video_path: str,
         output_dir: str,
         generate_vertical: bool = True,
+        source_url: str = "",
     ) -> Dict[str, str]:
         """
         完整的封面生成流程
@@ -222,32 +325,42 @@ class CoverGenerator:
         Returns:
             Dict[str, str]: {"horizontal": "path", "vertical": "path", "best_frame": "path"}
         """
-        os.makedirs(output_dir, exist_ok=True)
-        results = {}
+        self._prepare_output_dir(output_dir)
+        results: Dict[str, str] = {}
 
-        # 提取关键帧
-        frames = await self.extract_keyframes(video_path, output_dir, count=8)
-
-        if not frames:
-            logger.warning("⚠️ 未能提取到关键帧")
+        thumbnail_cover = await self._download_source_thumbnail(source_url, output_dir)
+        if thumbnail_cover:
+            results["horizontal"] = thumbnail_cover
+            if generate_vertical:
+                v_cover = os.path.join(output_dir, "cover_vertical.jpg")
+                if await self.create_vertical_cover(thumbnail_cover, v_cover):
+                    results["vertical"] = v_cover
             return results
 
-        # 选择最佳帧
-        best_frame = await self.select_best_frame(frames)
-        if best_frame:
-            results["best_frame"] = best_frame
+        frame_dir = tempfile.mkdtemp(prefix="vf_cover_frames_")
+        frames: List[str] = []
+        try:
+            frames = await self.extract_keyframes(video_path, frame_dir, count=8)
 
-            # 生成横版封面
+            if not frames:
+                logger.warning("⚠️ 未能提取到关键帧")
+                return results
+
+            best_frame = await self.select_best_frame(frames)
+            if not best_frame:
+                return results
+
             h_cover = os.path.join(output_dir, "cover_horizontal.jpg")
             if await self.create_horizontal_cover(best_frame, h_cover):
                 results["horizontal"] = h_cover
                 logger.info(f"✅ 横版封面: {h_cover}")
 
-            # 生成竖版封面
             if generate_vertical:
                 v_cover = os.path.join(output_dir, "cover_vertical.jpg")
                 if await self.create_vertical_cover(best_frame, v_cover):
                     results["vertical"] = v_cover
                     logger.info(f"✅ 竖版封面: {v_cover}")
+        finally:
+            shutil.rmtree(frame_dir, ignore_errors=True)
 
         return results

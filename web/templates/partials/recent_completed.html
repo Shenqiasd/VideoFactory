@@ -20,12 +20,18 @@
             <td class="py-3 text-[13px] text-fg-sub">{{ task.completed_at }}</td>
             <td class="py-3 text-[13px] text-fg-sub font-mono">{{ task.duration }}</td>
             <td class="py-3">
-                <div class="flex gap-1.5">
+                <div class="flex flex-wrap gap-1.5">
                     {% if task.has_long_video %}
                     <span class="px-2 py-0.5 rounded-lg bg-muted text-[11px] text-fg">长视频</span>
                     {% endif %}
                     {% if task.has_clips %}
                     <span class="px-2 py-0.5 rounded-lg bg-muted text-[11px] text-fg">{{ task.clips_count }}切片</span>
+                    {% endif %}
+                    {% if task.creation_review_pending %}
+                    <span class="px-2 py-0.5 rounded-lg bg-amber-50 text-[11px] text-amber-700">待审核</span>
+                    {% endif %}
+                    {% if task.has_cover %}
+                    <span class="px-2 py-0.5 rounded-lg bg-muted text-[11px] text-fg">已出封面</span>
                     {% endif %}
                     {% if task.has_article %}
                     <span class="px-2 py-0.5 rounded-lg bg-muted text-[11px] text-fg">文章</span>

@@ -1,6 +1,17 @@
 # 执行日志
 
 ## 2026-03-10
+- 18:05 [Codex] 接入句子级重组翻译
+  - 新增 `src/production/sentence_regrouper.py`，在主翻译阶段先将连续碎片 cue 合并为 sentence group，翻译后再按原 cue 数量投影回 `target_lines`
+  - `src/production/pipeline.py` 改为 `origin_entries -> sentence_regrouper -> target_lines -> SubtitleRepairer/QC`，尽量保持现有产物格式和后续链路不变
+  - `target_language.txt` / `translated_description` / TTS 源文本现在优先使用 group 级拼接文本，减少 cue 级断句带来的阅读和朗读割裂
+  - 验证结果：
+    - `./.venv/bin/python -m pytest -q` -> `161 passed`
+- 15:25 [Codex] 收口字幕英文残留与 QC 假阳性
+  - `src/production/subtitle_repair.py` 对首轮翻译后仍保留英文残留的行追加“前后文补翻”，优先修复 `released and every year thousands of old` 这类碎片句漏翻
+  - `src/production/pipeline.py` 的 `QualityChecker` 新增英文残留检测，不再只看中文覆盖率和完全未翻译占比；存在英文残留时会扣分，比例超阈值会直接判失败
+  - 补充回归测试覆盖上下文补翻与 QC 英文残留拦截，验证结果：
+    - `./.venv/bin/python -m pytest -q tests/test_subtitle_repair.py tests/test_quality_checker.py tests/test_production_asr_router.py` -> `13 passed`
 - 14:44 [Codex] 完成主流程核验与前端页面收口
   - `api/routes/pages.py` 新增统一页面层活跃状态/进度辅助逻辑，任务列表、仪表盘 active 卡片与统计卡统一使用同一套状态口径
   - `src/core/task.py` 的 `active_states()` 补入 `qc_passed`，页面、任务统计接口、系统状态统计的“活跃任务”定义保持一致
@@ -548,3 +559,186 @@
 - 15:53 [Codex] 修复 `uploading_source` 阶段缺失 `rclone` 导致的本地链路中断
   - `src/production/pipeline.py` 将源文件上传 R2 调整为 best-effort：上传失败时保留本地源视频继续执行
   - 新增回归测试覆盖 R2 上传失败时不中断主链路
+- 16:00 [Codex] 修复 YouTube 字幕 provider 在 Transcript API 为空时直接放弃的问题
+  - `src/asr/youtube_subtitle.py` 新增 `yt-dlp` 自动字幕回退，复用 cookies 配置并优先匹配目标语言字幕
+  - 新增测试覆盖 `youtube-transcript-api -> yt-dlp` 的回退路径
+- 16:30 [Codex] 修复 YouTube 自动字幕滚动重复污染翻译的问题
+  - `src/asr/youtube_subtitle.py` 优先解析 `srv3` 原始自动字幕，并对 `vtt/srt` 做滚动重叠去重
+  - 针对 `for years ... / fans have asked ... / press have asked ...` 这类重复片段新增回归测试
+
+## 2026-03-11 11:21 - 项目名称与下载命名规范落地
+
+**处理**:
+- `src/core/project_naming.py`
+  - 新增项目名称解析辅助：创建时标题抓取、语言码归一化、项目名称翻译、展示名回退
+- `api/routes/tasks.py`
+  - 创建单任务 / 批量任务时优先解析原视频标题并生成 `translated_title`
+  - `TaskResponse` / `TaskDetailResponse` 新增 `project_name`
+  - 下载产物文件名统一为 `项目名_产物类型[_平台|序号].ext`
+- `api/routes/production.py`
+  - `submit-and-run` 创建任务时同步生成项目名称
+- `src/production/pipeline.py`
+  - 删除“字幕第一句作为标题”的兜底逻辑，只允许 `source_title -> translated_title`
+- `api/routes/pages.py`
+  - 任务列表、Dashboard、最近完成、发布队列统一按 `project_name` 展示
+- `web/templates/task_detail.html`
+  - 任务详情顶部标题改为项目名称，并新增原视频标题展示
+- `scripts/backfill_task_project_names.py`
+  - 新增历史任务标题回填脚本，按新规则修正 `source_title / translated_title`
+- `tests/test_project_naming.py`
+  - 新增项目名称解析/禁用开关/远端标题抓取测试
+
+**验证**:
+- `python3 -m pytest -q tests/test_project_naming.py tests/test_production_asr_router.py tests/web/test_api_contract.py tests/web/test_partials_http.py` → `74 passed`
+- `python3 -m pytest -q tests/e2e/test_frontend_playwright.py -k 'task_detail_page_renders_translation_and_failed_step_context'` → `1 passed, 7 deselected`
+
+## 2026-03-13 09:46 - 字幕翻译回投断句修复
+
+**处理**:
+- `src/production/sentence_regrouper.py`
+  - 将 `project_translation(...)` 从“按长度找最近切点”升级为“protected span + boundary penalty + dynamic programming + local rebalance”
+  - 新增书名号、引号、括号、英文短语、数字单位等保护区识别，避免在语义单元内部硬切
+  - 新增 function word / 短残片 / 闭合符号尾巴惩罚，减少 `《天堂阶` / `梯》`、`to`、`）` 这类坏切分
+- `tests/test_sentence_regrouper.py`
+  - 新增书名号完整性、括号完整性、function word 尾巴回归测试
+- `workflow/state/current_step.json`
+  - 当前 Step 3 切换到“字幕翻译回投断句修复”实现任务
+- `workflow/steps/step3_implementation.md`
+  - 补充本次实现目标、设计依据与验证计划
+
+**验证**:
+- `./.venv/bin/python -m pytest -q tests/test_sentence_regrouper.py` → `6 passed`
+- `./.venv/bin/python -m pytest -q tests/test_global_translation_reviewer.py tests/test_subtitle_repair.py` → `12 passed`
+- `./.venv/bin/python -m pytest -q` → `184 passed, 1 failed`
+  - 独立失败：`tests/e2e/test_frontend_playwright.py::test_new_task_page_submit_button_creates_task`
+  - 现象：`/tasks/new` 点击“创建任务”后 3s 内未跳转 `/tasks`
+  - 复跑单测仍失败，表现与本次字幕回投逻辑无直接耦合，暂记录为现有前端 E2E 阻塞
+
+## 2026-03-13 11:41 - `/tasks/new` 前端 E2E 独立失败修复
+
+**根因**:
+- `web/templates/new_task.html` 把“创建任务后跳转列表页”实现为 `htmx after-request + setTimeout(location.href='/tasks', 800)`
+- 关键导航依赖前端增强脚本初始化完成；E2E 在 `domcontentloaded` 后立即点击提交，导致该链路在时序上不稳定
+- 页面还存在两个前端错误源：
+  - `web/templates/base.html` 使用了错误的 `tailwindcss.config`
+  - `previewDebug` 在空值时被 Alpine 直接解引用
+
+**处理**:
+- `web/templates/new_task.html`
+  - 单任务 / 批量任务改为原生 `method="post" action="/api/tasks/create|batch-create"`
+  - 移除依赖 JS 定时器的关键跳转路径
+  - 修复 `previewDebug` 空值访问
+- `api/routes/tasks.py`
+  - HTMX 请求返回 `HX-Redirect: /tasks`
+  - 浏览器原生表单导航请求返回 `303 /tasks`
+  - 普通 API 请求继续返回 JSON，兼容已有自动化调用
+- `tests/web/test_api_contract.py`
+  - 新增 HTMX 跳转头与浏览器表单跳转契约测试
+- `web/templates/base.html`
+  - 修复 Tailwind CDN 配置变量名
+
+**验证**:
+- `./.venv/bin/python -m pytest -q tests/e2e/test_frontend_playwright.py::test_new_task_page_submit_button_creates_task` → `1 passed`
+- `./.venv/bin/python -m pytest -q tests/web/test_api_contract.py tests/e2e/test_frontend_playwright.py` → `62 passed`
+- `./.venv/bin/python -m pytest -q` → `188 passed`
+
+## 2026-03-13 12:15 - 视频加工前端缺口审计与补齐方案文档
+
+**结论**:
+- 后端已具备高光提取、智能裁剪、短视频切分、BGM 混音、创作审核门禁等能力，但前端主要停留在 scope/字幕样式/切片开关层，用户无法感知或操作这些加工能力。
+- 设计采用“一次补齐”方向：创建页补创作配置、详情页补创作结果与审核中心、列表页补轻量能力徽标，并通过统一的 `creation_config` / `creation_state` / `creation_status` 建模承接。
+
+**新增文档**:
+- `docs/plans/2026-03-13-video-processing-frontend-gap-design.md`
+  - 汇总缺失能力、推荐方案、页面设计、接口设计、兼容策略与验收标准。
+- `docs/plans/2026-03-13-video-processing-frontend-gap-implementation.md`
+  - 按 API、模板、审核、封面、测试与文档同步拆分为可执行任务清单。
+
+**验证**:
+- 文档与现有实现对齐检查：人工核对 `api/routes/tasks.py`、`api/routes/factory.py`、`web/templates/new_task.html`、`web/templates/task_detail.html`、`src/creation/pipeline.py`、`src/factory/cover.py`
+- 相关既有能力验证基线：`./.venv/bin/python -m pytest -q tests/test_cover_generator.py tests/test_factory_pipeline_creation.py tests/test_creation_review_gate.py` → `7 passed`
+
+
+## 2026-03-13 12:08 - `/tasks` 页面去脆弱化
+
+**根因**:
+- `web/templates/tasks.html` 首屏只渲染骨架屏，依赖 Alpine 初始化后再调用 `htmx.ajax(...)` 拉取任务列表
+- 若 HTMX / Alpine / CDN 脚本延迟或缺失，`/tasks` 页面会停留在骨架屏，筛选按钮也只剩下 JS 行为而无回退链接
+- `web/templates/base.html` 中 `lucide.createIcons()` 也对外部脚本是硬依赖，脚本缺失时会直接抛错
+
+**处理**:
+- `api/routes/pages.py`
+  - 新增 `_build_task_list_context(...)`，把任务列表首屏渲染与 partial 渲染统一到同一套服务端上下文
+  - `/tasks` 页面现在直接服务端渲染任务列表，不再依赖首屏客户端拉取
+- `web/templates/tasks.html`
+  - 任务列表容器改为首屏直接 include `partials/task_list.html`
+  - 筛选按钮改为带 `href` 的链接；有 HTMX 时走局部刷新，没 HTMX 时直接整页跳转
+  - JS 中对 `window.htmx` 做守卫，避免未加载时报错
+- `web/templates/base.html`
+  - Lucide 初始化改为 `safeCreateIcons()`，外部脚本缺失时不再直接抛错
+- `web/templates/new_task.html`
+  - 补回创作配置表单区，恢复页面契约测试要求的字段展示
+
+**验证**:
+- `./.venv/bin/python -m pytest -q tests/web/test_pages_http.py tests/web/test_partials_http.py tests/e2e/test_frontend_playwright.py` → `37 passed`
+- `./.venv/bin/python -m pytest -q` → `191 passed`
+
+## 2026-03-13 19:25 - 视频加工前端能力补齐实现
+
+**实现范围**:
+- 创建页 `web/templates/new_task.html`
+  - 新增创作配置面板（clip_count、duration_min/max、crop_mode、review_mode、platforms、bgm、intro/outro、transition）
+  - 新增“本次创作将生成”摘要卡
+  - 继续保留原生表单提交路径，并由兼容接口持久化 `creation_config`
+- 任务接口 `api/routes/tasks.py`
+  - 兼容表单创建接口支持解析 `creation_*` 字段并写入 `creation_config`
+  - 新增 `GET /api/tasks/{task_id}/creation-summary`，按前端友好结构聚合 config/status/segments/variants/covers/actions
+- 详情页与列表
+  - `web/templates/task_detail.html` 新增创作结果区块，展示高光片段、平台变体、封面和创作审核状态
+  - `web/templates/task_detail.html` 接入 `/api/factory/review/approve|reject` 审核操作
+  - `web/templates/partials/task_list.html`、`web/templates/partials/recent_completed.html` 新增 creation badges
+  - `api/routes/pages.py` 增加 creation badge/封面摘要数据补充逻辑
+- 后端能力补真
+  - `highlight_strategy` 真正接入：`hybrid / semantic / legacy`
+  - `src/factory/cover.py` 补通 vertical cover 输出
+  - 新增 `tests/test_highlight_detector.py`
+- 架构文档同步
+  - `workflow/architecture.md` 补充创作配置、creation-summary、创作审核和高光策略/封面现状说明
+
+**验证**:
+- `./.venv/bin/python -m pytest -q tests/web/test_api_contract.py tests/web/test_pages_http.py -k 'create_alias or batch_create or creation_config or creation_summary or new_task'` → `13 passed`
+- `./.venv/bin/python -m pytest -q tests/test_highlight_detector.py tests/test_cover_generator.py tests/test_factory_pipeline_creation.py tests/test_creation_review_gate.py tests/web/test_api_contract.py tests/web/test_pages_http.py` → `81 passed`
+- `./.venv/bin/python -m pytest -q tests/e2e/test_frontend_playwright.py` → `9 passed`
+- `./.venv/bin/python -m pytest -q` → `200 passed`
+
+## 2026-03-14 09:15 - 创作审核拒绝交互改为 modal + 提交建议准备
+
+**处理**:
+- `web/templates/task_detail.html`
+  - 将创作审核“拒绝”操作从 `window.prompt()` 升级为页面内 modal
+  - 增加拒绝原因输入框、取消/确认按钮和遮罩点击关闭交互
+- `tests/web/test_pages_http.py`
+  - 补充任务详情页创作审核 modal 标记断言
+
+**验证**:
+- `./.venv/bin/python -m pytest -q tests/web/test_pages_http.py tests/e2e/test_frontend_playwright.py -k 'creation_review_panel or creation_review_actions or task_detail_supports_creation_review_actions'` → `2 passed, 21 deselected`
+
+
+## 2026-03-14 12:42 - Dashboard 首页去脆弱化
+
+**根因**:
+- `web/templates/dashboard.html` 的统计卡、活跃任务、服务状态、存储、最近完成都依赖 HTMX 首屏拉取
+- 当前端增强脚本或 CDN 资源延迟/缺失时，首页会停留在骨架屏，无法保证“无 JS 先可用”
+
+**处理**:
+- `api/routes/pages.py`
+  - 为 dashboard 抽出 `_build_stats_cards_context()`、`_build_active_tasks_context()`、`_build_service_status_detail_context()`、`_build_storage_overview_context()`、`_build_recent_completed_context()`
+  - `/` 首屏直接服务端渲染上述区块，partial 路由继续复用相同上下文构建逻辑
+- `web/templates/dashboard.html`
+  - 所有关键区块改为首屏直接 include partial 内容，HTMX 仅负责后续刷新
+- `tests/web/test_pages_http.py`
+  - 新增 dashboard 首屏已渲染 partial、而非骨架屏的回归测试
+
+**验证**:
+- `./.venv/bin/python -m pytest -q tests/web/test_pages_http.py tests/web/test_partials_http.py tests/e2e/test_frontend_playwright.py` → `41 passed`
+- `./.venv/bin/python -m pytest -q` → `201 passed`

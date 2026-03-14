@@ -1,8 +1,10 @@
 import json
+from urllib.parse import unquote
 
 from api.routes import tasks as tasks_routes
 from api.routes import distribute as distribute_routes
 from api.routes import factory as factory_routes
+from core import project_naming
 from core.task import Task, TaskState
 from distribute.scheduler import PublishJob
 from pathlib import Path
@@ -30,6 +32,52 @@ def test_create_alias_accepts_form_payload(client):
     assert task.source_url == "https://www.youtube.com/watch?v=single_case"
     assert task.enable_short_clips is True
     assert task.enable_article is True
+
+
+def test_create_alias_htmx_request_returns_hx_redirect(client):
+    response = client.post(
+        "/api/tasks/create",
+        data={
+            "youtube_url": "https://www.youtube.com/watch?v=single_htmx_case",
+            "source_lang": "en",
+            "target_lang": "zh_cn",
+        },
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("HX-Redirect") == "/tasks"
+
+
+def test_batch_create_alias_htmx_request_returns_hx_redirect(client):
+    response = client.post(
+        "/api/tasks/batch-create",
+        data={
+            "urls": "https://www.youtube.com/watch?v=batch_htmx_case",
+            "source_lang": "en",
+            "target_lang": "zh_cn",
+        },
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("HX-Redirect") == "/tasks"
+
+
+def test_create_alias_browser_form_post_redirects_to_tasks(client):
+    response = client.post(
+        "/api/tasks/create",
+        data={
+            "youtube_url": "https://www.youtube.com/watch?v=single_browser_case",
+            "source_lang": "en",
+            "target_lang": "zh_cn",
+        },
+        headers={"Accept": "text/html,application/xhtml+xml"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers.get("location") == "/tasks"
 
 
 def test_batch_create_alias_creates_multiple_tasks(client):
@@ -106,6 +154,139 @@ def test_json_create_persists_creation_config(client):
     assert task.creation_config["duration_min"] == 45
     assert task.creation_config["platforms"] == ["douyin", "bilibili"]
     assert task.creation_config["review_mode"] == "required"
+
+
+def test_json_create_detail_returns_normalized_creation_config(client):
+    response = client.post(
+        "/api/tasks/",
+        json={
+            "source_url": "https://www.youtube.com/watch?v=creation_detail_case",
+            "task_scope": "full",
+            "creation_config": {
+                "clip_count": 6,
+                "duration_min": 25,
+                "duration_max": 80,
+                "crop_mode": "center",
+                "review_mode": "manual",
+                "platforms": ["douyin", "xiaohongshu"],
+                "bgm_path": "/tmp/demo-bgm.mp3",
+                "bgm_volume": 0.33,
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    task_id = response.json()["task_id"]
+    detail = client.get(f"/api/tasks/{task_id}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["creation_config"]["clip_count"] == 6
+    assert payload["creation_config"]["duration_min"] == 25
+    assert payload["creation_config"]["duration_max"] == 80
+    assert payload["creation_config"]["crop_mode"] == "center"
+    assert payload["creation_config"]["review_mode"] == "required"
+    assert payload["creation_config"]["platforms"] == ["douyin", "xiaohongshu"]
+    assert payload["creation_config"]["bgm_path"] == "/tmp/demo-bgm.mp3"
+    assert payload["creation_config"]["bgm_volume"] == 0.33
+
+
+def test_json_create_resolves_project_name_from_source_title(client, monkeypatch):
+    monkeypatch.delenv("VF_DISABLE_TITLE_RESOLVE", raising=False)
+
+    async def _fake_translate(source_title, *, source_lang, target_lang, translator=None):
+        assert source_title == "Original Video Title"
+        assert source_lang == "en"
+        assert target_lang == "zh_cn"
+        return "规范项目名"
+
+    monkeypatch.setattr(project_naming, "translate_project_name", _fake_translate)
+
+    response = client.post(
+        "/api/tasks/",
+        json={
+            "source_url": "https://www.youtube.com/watch?v=project_title_case",
+            "source_title": "Original Video Title",
+            "source_lang": "en",
+            "target_lang": "zh_cn",
+        },
+    )
+    assert response.status_code == 200
+
+    task_id = response.json()["task_id"]
+    task = tasks_routes.get_task_store().get(task_id)
+    assert task is not None
+    assert task.source_title == "Original Video Title"
+    assert task.translated_title == "规范项目名"
+
+    detail = client.get(f"/api/tasks/{task_id}")
+    assert detail.status_code == 200
+    assert detail.json()["project_name"] == "规范项目名"
+
+
+def test_json_create_fetches_remote_title_when_source_title_missing(client, monkeypatch):
+    monkeypatch.delenv("VF_DISABLE_TITLE_RESOLVE", raising=False)
+
+    async def _fake_fetch(source_url, *, timeout_seconds=None, downloader=None):
+        assert source_url.endswith("missing_title_case")
+        return "Remote Original Title"
+
+    async def _fake_translate(source_title, *, source_lang, target_lang, translator=None):
+        assert source_title == "Remote Original Title"
+        return "远程项目名"
+
+    monkeypatch.setattr(project_naming, "fetch_remote_source_title", _fake_fetch)
+    monkeypatch.setattr(project_naming, "translate_project_name", _fake_translate)
+
+    response = client.post(
+        "/api/tasks/",
+        json={
+            "source_url": "https://www.youtube.com/watch?v=missing_title_case",
+            "source_lang": "en",
+            "target_lang": "zh_cn",
+        },
+    )
+    assert response.status_code == 200
+
+    task_id = response.json()["task_id"]
+    task = tasks_routes.get_task_store().get(task_id)
+    assert task is not None
+    assert task.source_title == "Remote Original Title"
+    assert task.translated_title == "远程项目名"
+
+
+def test_create_alias_persists_creation_config_from_form(client):
+    response = client.post(
+        "/api/tasks/create",
+        data={
+            "youtube_url": "https://www.youtube.com/watch?v=form_creation_case",
+            "source_lang": "en",
+            "target_lang": "zh_cn",
+            "task_scope": "full",
+            "creation_clip_count": "4",
+            "creation_duration_min": "20",
+            "creation_duration_max": "75",
+            "creation_crop_mode": "center",
+            "creation_review_mode": "required",
+            "creation_platforms": "douyin,bilibili",
+            "creation_bgm_path": "/tmp/form-bgm.mp3",
+            "creation_bgm_volume": "0.4",
+            "creation_transition": "fade",
+            "creation_transition_duration": "0.5",
+        },
+    )
+    assert response.status_code == 200
+
+    task_id = response.json()["task_id"]
+    task = tasks_routes.get_task_store().get(task_id)
+    assert task is not None
+    assert task.creation_config["clip_count"] == 4
+    assert task.creation_config["duration_min"] == 20
+    assert task.creation_config["duration_max"] == 75
+    assert task.creation_config["crop_mode"] == "center"
+    assert task.creation_config["platforms"] == ["douyin", "bilibili"]
+    assert task.creation_config["bgm_path"] == "/tmp/form-bgm.mp3"
+    assert task.creation_config["bgm_volume"] == 0.4
+    assert task.creation_config["transition_duration"] == 0.5
 
 
 def test_create_alias_respects_form_toggles(client):
@@ -213,6 +394,28 @@ def test_task_detail_contains_timeline(client):
     assert payload["timeline"]
 
 
+def test_task_detail_contains_global_review_report(client):
+    created = client.post(
+        "/api/tasks/",
+        json={"source_url": "https://www.youtube.com/watch?v=global_review_detail_case"},
+    )
+    task_id = created.json()["task_id"]
+
+    task = tasks_routes.get_task_store().get(task_id)
+    task.global_review_report = {
+        "status": "passed",
+        "passed": True,
+        "domain": {"name": "music", "confidence": 0.97},
+    }
+    tasks_routes.get_task_store().update(task)
+
+    detail = client.get(f"/api/tasks/{task_id}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["global_review_report"]["status"] == "passed"
+    assert payload["global_review_report"]["domain"]["name"] == "music"
+
+
 def test_task_detail_uses_translation_fields_instead_of_legacy_klic_fields(client):
     created = client.post(
         "/api/tasks/",
@@ -230,6 +433,7 @@ def test_task_detail_uses_translation_fields_instead_of_legacy_klic_fields(clien
     payload = detail.json()
     assert payload["translation_task_id"] == "selfhosted_youtube_test"
     assert payload["translation_progress"] == 88
+    assert "project_name" in payload
     assert "klic_task_id" not in payload
     assert "klic_progress" not in payload
 
@@ -269,6 +473,73 @@ def test_production_status_uses_translation_fields(client):
     assert "klic_progress" not in payload
 
 
+def test_creation_summary_groups_segments_variants_and_covers(client):
+    created = client.post(
+        "/api/tasks/",
+        json={
+            "source_url": "https://www.youtube.com/watch?v=creation_summary_case",
+            "task_scope": "full",
+        },
+    )
+    assert created.status_code == 200
+    task_id = created.json()["task_id"]
+
+    task = tasks_routes.get_task_store().get(task_id)
+    task.creation_state = {
+        "stage": "completed",
+        "status": "completed",
+        "segments_total": 1,
+        "variants_total": 1,
+        "used_fallback": False,
+        "selected_segments": [
+            {
+                "segment_id": "seg_001",
+                "title": "知识点片段 1",
+                "start": 12.0,
+                "end": 55.0,
+                "duration": 43.0,
+                "crop_track": {"strategy": "yolo", "focus_class": "person"},
+            }
+        ],
+    }
+    task.creation_status = {
+        "review_required": True,
+        "review_status": "pending",
+        "status": "completed",
+    }
+    task.products = [
+        {
+            "type": "short_clip",
+            "platform": "douyin",
+            "title": "知识点片段 1 · douyin",
+            "local_path": "/tmp/seg001_douyin.mp4",
+            "metadata": {"segment_id": "seg_001", "review_status": "pending"},
+        },
+        {
+            "type": "cover",
+            "platform": "all",
+            "title": "横版封面",
+            "local_path": "/tmp/cover_horizontal.jpg",
+            "metadata": {"cover_type": "horizontal"},
+        },
+    ]
+    tasks_routes.get_task_store().update(task)
+
+    response = client.get(f"/api/tasks/{task_id}/creation-summary")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["config"]["clip_count"] >= 1
+    assert payload["status"]["review_status"] == "pending"
+    assert payload["actions"]["can_approve"] is True
+    assert len(payload["segments"]) == 1
+    assert payload["segments"][0]["segment_id"] == "seg_001"
+    assert len(payload["variants_by_segment"]) == 1
+    assert payload["variants_by_segment"][0]["segment_id"] == "seg_001"
+    assert payload["variants_by_segment"][0]["variants"][0]["platform"] == "douyin"
+    assert len(payload["covers"]) == 1
+    assert payload["covers"][0]["metadata"]["cover_type"] == "horizontal"
+
+
 def test_factory_review_approve_endpoint_updates_creation_status(client):
     task = tasks_routes.get_task_store().create(
         source_url="https://www.youtube.com/watch?v=review_gate_case",
@@ -296,7 +567,10 @@ def test_task_artifacts_list_and_download(client, tmp_path):
 
     created = client.post(
         "/api/tasks/",
-        json={"source_url": "https://www.youtube.com/watch?v=artifact_case"},
+        json={
+            "source_url": "https://www.youtube.com/watch?v=artifact_case",
+            "source_title": "artifact title",
+        },
     )
     task_id = created.json()["task_id"]
 
@@ -314,6 +588,9 @@ def test_task_artifacts_list_and_download(client, tmp_path):
     download_resp = client.get(subtitle_artifact["download_url"])
     assert download_resp.status_code == 200
     assert download_resp.content == subtitle_file.read_bytes()
+    content_disposition = unquote(download_resp.headers.get("content-disposition", ""))
+    assert subtitle_artifact["download_filename"] == "artifact_title_双语字幕.srt"
+    assert "artifact_title_双语字幕.srt" in content_disposition
 
 
 def test_task_artifacts_download_falls_back_to_r2(client, monkeypatch, tmp_path):
@@ -347,10 +624,44 @@ def test_task_artifacts_download_falls_back_to_r2(client, monkeypatch, tmp_path)
     assert list_resp.status_code == 200
     artifact = next(a for a in list_resp.json()["artifacts"] if a["r2_path"])
     assert artifact["downloadable"] is True
+    assert artifact["download_filename"] == "task_{}_长视频.mp4".format(task_id[:8])
 
     download_resp = client.get(artifact["download_url"])
     assert download_resp.status_code == 200
     assert download_resp.content == b"from-r2"
+
+
+def test_task_artifact_download_supports_inline_image_preview(client, tmp_path):
+    cover_file = tmp_path / "cover.png"
+    cover_file.write_bytes(b"fake-cover")
+
+    created = client.post(
+        "/api/tasks/",
+        json={"source_url": "https://www.youtube.com/watch?v=inline_cover_case"},
+    )
+    task_id = created.json()["task_id"]
+
+    task = tasks_routes.get_task_store().get(task_id)
+    task.products = [
+        {
+            "type": "cover",
+            "platform": "all",
+            "local_path": str(cover_file),
+            "metadata": {"cover_type": "horizontal"},
+        }
+    ]
+    tasks_routes.get_task_store().update(task)
+
+    list_resp = client.get(f"/api/tasks/{task_id}/artifacts")
+    assert list_resp.status_code == 200
+    artifact = next(a for a in list_resp.json()["artifacts"] if a["type"] == "cover")
+
+    download_resp = client.get(artifact["download_url"], params={"inline": 1})
+    assert download_resp.status_code == 200
+    assert download_resp.content == b"fake-cover"
+    assert download_resp.headers["content-type"].startswith("image/png")
+    content_disposition = unquote(download_resp.headers.get("content-disposition", ""))
+    assert content_disposition.startswith("inline;")
 
 
 def test_create_alias_accepts_subtitle_style_fields(client):

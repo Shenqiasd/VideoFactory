@@ -64,11 +64,15 @@
     </div>
 
     <div class="mt-4 rounded-2xl border border-border px-4 py-3" id="translation-section" style="display:none">
-        <div class="text-[12px] text-fg-sub mb-2">翻译与质检</div>
+        <div class="text-[12px] text-fg-sub mb-2">项目信息与质检</div>
         <div class="grid grid-cols-2 gap-4 text-[13px]">
             <div>
-                <div class="text-[12px] text-fg-faint mb-1">翻译标题</div>
+                <div class="text-[12px] text-fg-faint mb-1">项目名称</div>
                 <div class="text-fg-strong" id="task-translated-title">-</div>
+            </div>
+            <div>
+                <div class="text-[12px] text-fg-faint mb-1">原视频标题</div>
+                <div class="text-fg" id="task-source-title-display">-</div>
             </div>
             <div>
                 <div class="text-[12px] text-fg-faint mb-1">翻译阶段</div>
@@ -82,12 +86,63 @@
                 <div class="text-[12px] text-fg-faint mb-1">质检详情</div>
                 <div class="text-fg" id="task-qc-details">-</div>
             </div>
+            <div class="col-span-2">
+                <div class="flex items-center justify-between gap-3 mb-1">
+                    <div class="text-[12px] text-fg-faint">翻译简介</div>
+                    <button
+                        type="button"
+                        id="copy-description-button"
+                        class="h-8 px-3 rounded-xl border border-border text-[12px] font-medium text-fg-sub hover:bg-muted transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled
+                    >复制简介</button>
+                </div>
+                <div class="text-fg whitespace-pre-wrap break-words" id="task-translated-description">-</div>
+            </div>
+            <div>
+                <div class="text-[12px] text-fg-faint mb-1">全局审阅</div>
+                <div class="text-fg-strong" id="task-global-review-summary">-</div>
+            </div>
+            <div>
+                <div class="text-[12px] text-fg-faint mb-1">审阅域</div>
+                <div class="text-fg" id="task-global-review-domain">-</div>
+            </div>
+            <div class="col-span-2">
+                <div class="text-[12px] text-fg-faint mb-1">审阅问题</div>
+                <div class="text-fg" id="task-global-review-issues">-</div>
+            </div>
         </div>
     </div>
 
     <div class="mt-4 rounded-2xl border border-border px-4 py-3" id="error-section" style="display:none">
         <div class="text-[12px] text-red-500 mb-1">错误信息</div>
         <div class="text-[13px] text-red-600" id="task-error-message">-</div>
+    </div>
+
+    <div class="mt-4 rounded-2xl border border-border px-4 py-3" id="creation-panel">
+        <div class="text-[12px] text-fg-sub mb-2">创作结果</div>
+        <div id="creation-summary" class="space-y-3">
+            <div class="text-[13px] text-fg-faint">加载中...</div>
+        </div>
+        <div class="mt-4 pt-4 border-t border-border" id="creation-review-actions">
+            <div class="text-[12px] text-fg-sub mb-2">创作审核</div>
+            <div id="creation-review-status" class="text-[13px] text-fg-sub mb-3">加载中...</div>
+            <div class="flex items-center gap-2" id="creation-review-buttons">
+                <button type="button" id="approve-creation-button" class="h-9 px-4 rounded-2xl bg-black text-white text-[13px] font-medium hover:bg-fg-strong transition">通过审核</button>
+                <button type="button" id="reject-creation-button" class="h-9 px-4 rounded-2xl border border-red-200 text-red-600 text-[13px] font-medium hover:bg-red-50 transition">拒绝</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="creation-reject-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 px-4">
+        <div class="w-full max-w-md rounded-3xl bg-white border border-border shadow-card p-5">
+            <div class="text-[16px] font-semibold text-fg-strong">拒绝创作审核</div>
+            <p class="mt-1 text-[13px] text-fg-sub">请填写拒绝原因，便于后续重新裁剪或调整片段。</p>
+            <textarea id="creation-reject-note" class="mt-4 w-full min-h-[120px] px-4 py-3 rounded-2xl border border-border text-[13px] text-fg-strong placeholder:text-fg-faint outline-none focus:border-fg-sub transition" placeholder="例如：第 2 段裁剪主体偏移，建议重新裁剪"></textarea>
+            <div class="mt-4 flex items-center justify-end gap-2">
+                <button type="button" id="cancel-reject-modal-button" class="h-9 px-4 rounded-2xl border border-border text-[13px] font-medium text-fg hover:bg-muted transition">取消</button>
+                <button type="button" id="confirm-reject-modal-button" class="h-9 px-4 rounded-2xl bg-red-600 text-white text-[13px] font-medium hover:bg-red-700 transition">确认拒绝</button>
+            </div>
+        </div>
     </div>
 
     <div class="mt-4 rounded-2xl border border-border px-4 py-3">
@@ -140,6 +195,7 @@
         "downloaded": "已下载",
         "uploading_source": "上传源文件",
         "translating": "翻译中",
+        "global_reviewing": "全局审阅",
         "qc_checking": "质检中",
         "qc_passed": "质检通过",
         "qc_failed": "质检失败",
@@ -153,6 +209,7 @@
     };
 
     var stepStateAliases = {
+        "global_reviewing": "translating",
         "qc_failed": "qc_checking",
         "partial_success": "publishing"
     };
@@ -314,6 +371,122 @@
         throw lastError || new Error("request_failed");
     }
 
+    async function postJson(path, payload) {
+        var lastError = null;
+        for (var i = 0; i < apiBases.length; i++) {
+            var url = apiBases[i] + path;
+            try {
+                var resp = await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload || {}),
+                });
+                var data = await resp.json().catch(function() { return {}; });
+                if (!resp.ok) {
+                    lastError = new Error((data && data.detail) || ("HTTP " + resp.status));
+                    continue;
+                }
+                return data;
+            } catch (e) {
+                lastError = e;
+            }
+        }
+        throw lastError || new Error("request_failed");
+    }
+
+    function renderCreationSummary(summary) {
+        var container = document.getElementById("creation-summary");
+        if (!container) return;
+
+        if (!summary || (!summary.segments || summary.segments.length === 0) && (!summary.covers || summary.covers.length === 0)) {
+            container.innerHTML = '<div class="text-[13px] text-fg-faint">暂无创作结果</div>';
+            return;
+        }
+
+        var status = summary.status || {};
+        var config = summary.config || {};
+        var segments = summary.variants_by_segment || [];
+        var covers = summary.covers || [];
+        var warnings = Array.isArray(status.warnings) ? status.warnings : [];
+        var header = '' +
+            '<div class="grid grid-cols-2 gap-3 text-[13px]">' +
+                '<div class="rounded-xl bg-muted/60 px-3 py-2"><div class="text-fg-faint text-[12px] mb-1">创作状态</div><div class="text-fg-strong">' + (status.status || status.review_status || '-') + '</div></div>' +
+                '<div class="rounded-xl bg-muted/60 px-3 py-2"><div class="text-fg-faint text-[12px] mb-1">审核状态</div><div class="text-fg-strong">' + (status.review_status || '-') + '</div></div>' +
+                '<div class="rounded-xl bg-muted/60 px-3 py-2"><div class="text-fg-faint text-[12px] mb-1">切片配置</div><div class="text-fg-strong">' + ((config.clip_count || 0) + ' 段 / ' + (config.duration_min || '-') + '-' + (config.duration_max || '-') + ' 秒') + '</div></div>' +
+                '<div class="rounded-xl bg-muted/60 px-3 py-2"><div class="text-fg-faint text-[12px] mb-1">裁剪模式</div><div class="text-fg-strong">' + (config.crop_mode === 'center' ? '中心裁剪' : '智能裁剪') + ((status.used_fallback) ? ' · fallback' : '') + '</div></div>' +
+            '</div>';
+
+        var warningHtml = warnings.length > 0
+            ? '<div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-700">' + warnings.join('；') + '</div>'
+            : '';
+
+        var segmentHtml = segments.map(function(item) {
+            var segment = item.segment || {};
+            var cropTrack = segment.crop_track || {};
+            var variants = item.variants || [];
+            var variantHtml = variants.length > 0
+                ? variants.map(function(variant) {
+                    var metadata = variant.metadata || {};
+                    var downloadText = variant.local_path || variant.r2_path || '-';
+                    return '<div class="rounded-lg bg-white px-3 py-2 border border-border">' +
+                        '<div class="text-[13px] text-fg-strong">' + (variant.platform || '-') + ' · ' + (metadata.review_status || status.review_status || '-') + '</div>' +
+                        '<div class="text-[12px] text-fg-sub mt-1 break-all">' + downloadText + '</div>' +
+                    '</div>';
+                }).join('')
+                : '<div class="text-[12px] text-fg-faint">暂无平台成片</div>';
+
+            return '<div class="rounded-2xl border border-border px-4 py-3">' +
+                '<div class="flex items-center justify-between gap-3">' +
+                    '<div class="text-[14px] font-medium text-fg-strong">' + (segment.title || item.segment_id || '片段') + '</div>' +
+                    '<div class="text-[12px] text-fg-faint">' + ((segment.start ?? '-') + 's ~ ' + (segment.end ?? '-') + 's') + '</div>' +
+                '</div>' +
+                '<div class="mt-2 text-[12px] text-fg-sub">时长 ' + (segment.duration || '-') + ' 秒 · 裁剪 ' + (cropTrack.strategy || '-') + ' / ' + (cropTrack.focus_class || '-') + '</div>' +
+                '<div class="mt-3 grid gap-2">' + variantHtml + '</div>' +
+            '</div>';
+        }).join('');
+
+        var coverHtml = covers.length > 0
+            ? '<div class="rounded-2xl border border-border px-4 py-3"><div class="text-[13px] font-medium text-fg-strong mb-2">封面产物</div>' + covers.map(function(cover) {
+                var metadata = cover.metadata || {};
+                return '<div class="text-[12px] text-fg-sub">' + (metadata.cover_type || 'cover') + ' · ' + (cover.local_path || cover.r2_path || '-') + '</div>';
+            }).join('') + '</div>'
+            : '';
+
+        container.innerHTML = header + warningHtml + '<div class="space-y-3 mt-3">' + segmentHtml + '</div>' + (coverHtml ? '<div class="mt-3">' + coverHtml + '</div>' : '');
+    }
+
+    function renderCreationReview(summary) {
+        var statusEl = document.getElementById("creation-review-status");
+        var buttonsEl = document.getElementById("creation-review-buttons");
+        var approveButton = document.getElementById("approve-creation-button");
+        var rejectButton = document.getElementById("reject-creation-button");
+        if (!statusEl || !buttonsEl || !approveButton || !rejectButton) return;
+
+        var status = (summary && summary.status) || {};
+        var actions = (summary && summary.actions) || {};
+        var reviewStatus = status.review_status || 'not_required';
+        var labelMap = { pending: '待审核', approved: '已通过', rejected: '已拒绝', not_required: '无需审核' };
+        statusEl.textContent = labelMap[reviewStatus] || reviewStatus;
+        buttonsEl.style.display = actions.can_review ? 'flex' : 'none';
+        approveButton.disabled = !actions.can_approve;
+        rejectButton.disabled = !actions.can_reject;
+    }
+
+    async function loadCreationSummary() {
+        try {
+            var summary = await fetchJson('/api/tasks/' + encodeURIComponent(taskId) + '/creation-summary');
+            renderCreationSummary(summary);
+            renderCreationReview(summary);
+            return summary;
+        } catch (e) {
+            var container = document.getElementById('creation-summary');
+            if (container) container.innerHTML = '<div class="text-[13px] text-red-500">创作结果加载失败</div>';
+            var statusEl = document.getElementById('creation-review-status');
+            if (statusEl) statusEl.textContent = '创作结果加载失败';
+            return null;
+        }
+    }
+
     function renderArtifacts(artifacts) {
         var container = document.getElementById("artifact-list");
         if (!container) return;
@@ -386,6 +559,22 @@
         }).join("");
     }
 
+    async function copyText(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            return;
+        }
+        var textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+    }
+
     async function loadPublishEvents() {
         try {
             var payload = await fetchJson("/api/distribute/events/" + encodeURIComponent(taskId));
@@ -423,14 +612,20 @@
         try {
             var data = await fetchJson("/api/tasks/" + encodeURIComponent(taskId));
             var scope = data.task_scope || "full";
-            var displayTitle = data.source_title || data.translated_title || data.source_url || taskId;
+            var globalReview = data.global_review_report || {};
+            var displayTitle = data.project_name || data.translated_title || data.source_title || data.source_url || taskId;
             var displayStepState = inferDisplayStepState(data.state, data.last_step, data.timeline);
             var translationProgress = typeof data.translation_progress === "number"
                 ? data.translation_progress + "%"
                 : "-";
             var translationMeta = [];
+            var sourceTitle = (data.source_title || "").trim();
+            var projectName = (data.project_name || data.translated_title || data.source_title || data.source_url || taskId || "").trim();
             var hasQcScore = data.qc_score !== null && data.qc_score !== undefined && data.qc_score !== "";
             var hasQcDetails = typeof data.qc_details === "string" && data.qc_details.trim() !== "";
+            var hasGlobalReview = globalReview && Object.keys(globalReview).length > 0;
+            var translatedDescription = (data.translated_description || "").trim();
+            var hasTranslatedDescription = translatedDescription !== "";
             if (data.translation_task_id) {
                 translationMeta.push(data.translation_task_id);
             }
@@ -452,14 +647,38 @@
             document.getElementById("task-source-url").textContent = data.source_url || "-";
 
             var translationSection = document.getElementById("translation-section");
-            if (data.translated_title || translationMeta.length > 0 || hasQcScore || hasQcDetails) {
+            if (projectName || sourceTitle || translationMeta.length > 0 || hasQcScore || hasQcDetails || hasGlobalReview || hasTranslatedDescription) {
                 translationSection.style.display = "block";
-                document.getElementById("task-translated-title").textContent = data.translated_title || "-";
+                document.getElementById("task-translated-title").textContent = projectName || "-";
+                document.getElementById("task-source-title-display").textContent = sourceTitle || "-";
                 document.getElementById("task-translation-meta").textContent = translationMeta.length > 0 ? translationMeta.join(" · ") : "-";
                 document.getElementById("task-qc-score").textContent = hasQcScore ? String(data.qc_score) + " 分" : "-";
                 document.getElementById("task-qc-details").textContent = data.qc_details || "-";
+                document.getElementById("task-translated-description").textContent = translatedDescription || "-";
+                document.getElementById("task-global-review-summary").textContent = globalReview.summary || "-";
+                document.getElementById("task-global-review-domain").textContent = hasGlobalReview
+                    ? ((globalReview.domain && globalReview.domain.name) || "-") + " · " + (globalReview.status || "-")
+                    : "-";
+                var reviewIssues = [];
+                if (Array.isArray(globalReview.issues_after) && globalReview.issues_after.length > 0) {
+                    reviewIssues = globalReview.issues_after.map(function(item) {
+                        return item.message || item.code || "-";
+                    });
+                } else if (globalReview.blocking_reason) {
+                    reviewIssues = [globalReview.blocking_reason];
+                }
+                document.getElementById("task-global-review-issues").textContent = reviewIssues.length > 0
+                    ? reviewIssues.join("；")
+                    : "-";
             } else {
                 translationSection.style.display = "none";
+            }
+
+            var copyButton = document.getElementById("copy-description-button");
+            if (copyButton) {
+                copyButton.disabled = !hasTranslatedDescription;
+                copyButton.dataset.copyText = translatedDescription;
+                copyButton.textContent = "复制简介";
             }
 
             // 错误信息
@@ -474,11 +693,94 @@
             renderPublishAccounts(data);
             // 步骤进度条
             renderSteps(scope, data.state, data.last_step, data.timeline);
+            await loadCreationSummary();
             await loadArtifacts();
             await loadPublishEvents();
         } catch (error) {
             document.getElementById("task-state").textContent = "加载失败";
         }
+    }
+
+    var copyDescriptionButton = document.getElementById("copy-description-button");
+    if (copyDescriptionButton) {
+        copyDescriptionButton.addEventListener("click", async function() {
+            var text = copyDescriptionButton.dataset.copyText || "";
+            if (!text) return;
+            try {
+                await copyText(text);
+                copyDescriptionButton.textContent = "已复制";
+                window.setTimeout(function() {
+                    copyDescriptionButton.textContent = "复制简介";
+                }, 1500);
+            } catch (e) {
+                copyDescriptionButton.textContent = "复制失败";
+                window.setTimeout(function() {
+                    copyDescriptionButton.textContent = "复制简介";
+                }, 1500);
+            }
+        });
+    }
+
+    var approveCreationButton = document.getElementById("approve-creation-button");
+    if (approveCreationButton) {
+        approveCreationButton.addEventListener("click", async function() {
+            try {
+                await postJson('/api/factory/review/approve', { task_id: taskId });
+                await loadTask();
+            } catch (e) {
+                showToast('通过审核失败', 'error');
+            }
+        });
+    }
+
+    var rejectCreationButton = document.getElementById("reject-creation-button");
+    var rejectModal = document.getElementById('creation-reject-modal');
+    var rejectNoteInput = document.getElementById('creation-reject-note');
+    var cancelRejectModalButton = document.getElementById('cancel-reject-modal-button');
+    var confirmRejectModalButton = document.getElementById('confirm-reject-modal-button');
+
+    function closeRejectModal() {
+        if (!rejectModal) return;
+        rejectModal.classList.add('hidden');
+        rejectModal.classList.remove('flex');
+    }
+
+    function openRejectModal() {
+        if (!rejectModal) return;
+        rejectModal.classList.remove('hidden');
+        rejectModal.classList.add('flex');
+        if (rejectNoteInput) {
+            rejectNoteInput.value = '需要调整片段或裁剪';
+            window.setTimeout(function() { rejectNoteInput.focus(); rejectNoteInput.select(); }, 0);
+        }
+    }
+
+    if (rejectModal) {
+        rejectModal.addEventListener('click', function(event) {
+            if (event.target === rejectModal) closeRejectModal();
+        });
+    }
+    if (cancelRejectModalButton) {
+        cancelRejectModalButton.addEventListener('click', function() {
+            closeRejectModal();
+        });
+    }
+    if (rejectCreationButton) {
+        rejectCreationButton.addEventListener("click", function() {
+            openRejectModal();
+        });
+    }
+    if (confirmRejectModalButton) {
+        confirmRejectModalButton.addEventListener('click', async function() {
+            var note = rejectNoteInput ? rejectNoteInput.value.trim() : '';
+            try {
+                await postJson('/api/factory/review/reject', { task_id: taskId, note: note });
+                closeRejectModal();
+                await loadTask();
+            } catch (e) {
+                showToast('拒绝审核失败', 'error');
+            }
+        });
     }
 
     loadTask();

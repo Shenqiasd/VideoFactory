@@ -113,12 +113,19 @@ class FactoryPipeline:
             transcript = task.transcript_text
 
             if scope == "subtitle_only":
-                logger.info("🎞️ subtitle_only 模式：仅执行字幕压制长视频")
-                long_video_path = await self._process_long_video(task, video_path, subtitle_path, output_dir)
+                logger.info("🎞️ subtitle_only 模式：执行字幕压制长视频 + 封面 + 简介")
+                subtitle_only_results = await asyncio.gather(
+                    self._process_long_video(task, video_path, subtitle_path, output_dir),
+                    self._process_covers(task, video_path, output_dir),
+                    self._process_metadata(task, transcript),
+                    return_exceptions=True,
+                )
+                long_video_path, cover_paths, metadata_map = subtitle_only_results
                 clip_result = {"variants": [], "segments": [], "masters": [], "stats": {}, "review_status": "approved"}
-                cover_paths = {}
-                metadata_map = {}
                 article_map = {}
+                for result in subtitle_only_results:
+                    if isinstance(result, Exception):
+                        logger.error("subtitle_only 产物生成异常: %s", result)
                 if not long_video_path:
                     task.fail("字幕压制失败，未生成长视频", error_code="LONG_VIDEO_BUILD_FAILED")
                     self.task_store.update(task)
@@ -260,6 +267,7 @@ class FactoryPipeline:
                 video_path=video_path,
                 output_dir=cover_dir,
                 generate_vertical=True,
+                source_url=task.source_url,
             )
             logger.info(f"✅ 封面生成: {covers}")
             return covers
@@ -312,6 +320,9 @@ class FactoryPipeline:
         metadata_map,
     ):
         """记录产出物到任务"""
+        long_video_metadata = metadata_map.get("bilibili", {}) if isinstance(metadata_map, dict) else {}
+        long_video_description = self._build_long_video_description(task, long_video_metadata)
+
         # 长视频
         if long_video_path and not isinstance(long_video_path, Exception):
             product = TaskProduct(
@@ -319,8 +330,8 @@ class FactoryPipeline:
                 platform="all",
                 local_path=str(long_video_path),
                 title=task.translated_title,
-                description=task.translated_description,
-                metadata=metadata_map.get("bilibili", {}) if isinstance(metadata_map, dict) else {},
+                description=long_video_description,
+                metadata=long_video_metadata,
             )
             task.add_product(product)
 
@@ -378,6 +389,16 @@ class FactoryPipeline:
                 task.add_product(product)
 
         self.task_store.update(task)
+
+    @staticmethod
+    def _build_long_video_description(task: Task, metadata: Dict[str, Any]) -> str:
+        metadata_description = ""
+        if isinstance(metadata, dict):
+            metadata_description = str(metadata.get("description", "") or "").strip()
+
+        base_description = metadata_description or str(task.translated_description or "").strip()
+        normalized = " ".join(base_description.split())
+        return normalized[:200]
 
     async def _upload_products(self, task: Task, output_dir: Path):
         """上传所有产出物到R2"""

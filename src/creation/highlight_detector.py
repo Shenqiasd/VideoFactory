@@ -190,7 +190,10 @@ class HighlightDetector:
         clip_count: int,
         min_duration: int,
         max_duration: int,
+        *,
+        strategy: str = "hybrid",
     ) -> List[HighlightSegment]:
+        strategy = str(strategy or "hybrid").strip().lower()
         for candidate in candidates:
             duration = max(1.0, candidate.duration)
             duration_penalty = 0.0
@@ -198,6 +201,9 @@ class HighlightDetector:
                 duration_penalty = 0.2
             elif duration > max_duration:
                 duration_penalty = 0.15
+            if strategy == "semantic":
+                candidate.total_score = max(0.0, candidate.semantic_score - duration_penalty)
+                continue
             candidate.total_score = max(
                 0.0,
                 candidate.semantic_score * 0.6
@@ -247,6 +253,7 @@ class HighlightDetector:
         min_duration: int = 30,
         max_duration: int = 180,
         audio_source_path: str = "",
+        strategy: str = "hybrid",
     ) -> List[HighlightSegment]:
         entries = parse_srt_file(subtitle_path)
         if not entries:
@@ -261,13 +268,26 @@ class HighlightDetector:
         if not candidates:
             return []
 
-        scene_points = self._detect_scene_boundaries(video_path)
-        self._score_with_scenes(candidates, scene_points)
-        self._score_with_audio(candidates, audio_source_path)
-        selected = self._select_top_segments(candidates, clip_count, min_duration, max_duration)
+        strategy = str(strategy or "hybrid").strip().lower()
+        if strategy == "semantic":
+            for candidate in candidates:
+                candidate.scene_score = 0.0
+                candidate.audio_score = 0.0
+        else:
+            scene_points = self._detect_scene_boundaries(video_path)
+            self._score_with_scenes(candidates, scene_points)
+            self._score_with_audio(candidates, audio_source_path)
+        selected = self._select_top_segments(
+            candidates,
+            clip_count,
+            min_duration,
+            max_duration,
+            strategy=strategy,
+        )
 
         logger.info(
-            "🎯 高光识别完成: candidates=%s selected=%s audio_source=%s",
+            "🎯 高光识别完成: strategy=%s candidates=%s selected=%s audio_source=%s",
+            strategy,
             len(candidates),
             len(selected),
             audio_source_path or "none",

@@ -26,8 +26,7 @@
 
         <!-- Single Mode -->
         <div x-show="mode === 'single'" x-transition>
-            <form hx-post="/api/tasks/create" hx-swap="none"
-                  hx-on::after-request="if(event.detail.successful) { showToast('任务创建成功，等待 Worker 处理', 'success'); setTimeout(function(){location.href='/tasks'},800); }">
+            <form method="post" action="/api/tasks/create">
 
                 <div class="space-y-5">
                     <div>
@@ -60,7 +59,7 @@
                         <label class="block text-[13px] font-medium text-fg-strong mb-2">任务范围</label>
                         <div class="grid grid-cols-2 gap-2">
                             <label class="relative cursor-pointer">
-                                <input type="radio" name="task_scope" value="subtitle_only" class="sr-only peer" @change="scope = 'subtitle_only'" />
+                                <input type="radio" name="task_scope" value="subtitle_only" class="sr-only peer" @change="setScope('subtitle_only')" />
                                 <div class="rounded-2xl border-2 border-border px-4 py-3
                                             peer-checked:border-black peer-checked:bg-muted-dark transition">
                                     <div class="text-[13px] font-semibold text-fg-strong">仅翻译字幕</div>
@@ -68,7 +67,7 @@
                                 </div>
                             </label>
                             <label class="relative cursor-pointer">
-                                <input type="radio" name="task_scope" value="subtitle_dub" class="sr-only peer" @change="scope = 'subtitle_dub'" />
+                                <input type="radio" name="task_scope" value="subtitle_dub" class="sr-only peer" @change="setScope('subtitle_dub')" />
                                 <div class="rounded-2xl border-2 border-border px-4 py-3
                                             peer-checked:border-black peer-checked:bg-muted-dark transition">
                                     <div class="text-[13px] font-semibold text-fg-strong">翻译+配音</div>
@@ -76,7 +75,7 @@
                                 </div>
                             </label>
                             <label class="relative cursor-pointer">
-                                <input type="radio" name="task_scope" value="dub_and_copy" class="sr-only peer" @change="scope = 'dub_and_copy'" />
+                                <input type="radio" name="task_scope" value="dub_and_copy" class="sr-only peer" @change="setScope('dub_and_copy')" />
                                 <div class="rounded-2xl border-2 border-border px-4 py-3
                                             peer-checked:border-black peer-checked:bg-muted-dark transition">
                                     <div class="text-[13px] font-semibold text-fg-strong">翻译+配音+文案</div>
@@ -84,7 +83,7 @@
                                 </div>
                             </label>
                             <label class="relative cursor-pointer">
-                                <input type="radio" name="task_scope" value="full" class="sr-only peer" checked @change="scope = 'full'" />
+                                <input type="radio" name="task_scope" value="full" class="sr-only peer" checked @change="setScope('full')" />
                                 <div class="rounded-2xl border-2 border-border px-4 py-3
                                             peer-checked:border-black peer-checked:bg-muted-dark transition">
                                     <div class="text-[13px] font-semibold text-fg-strong">全流程</div>
@@ -163,32 +162,137 @@
                             <details>
                                 <summary class="cursor-pointer text-fg">渲染调试信息</summary>
                                 <div class="mt-2 space-y-1">
-                                    <div>请求字体: <span class="text-fg-strong" x-text="previewDebug.font_requested || '-'"></span></div>
-                                    <div>实际字体: <span class="text-fg-strong" x-text="previewDebug.font_used || '-'"></span></div>
-                                    <div>可见性评分: <span class="text-fg-strong" x-text="previewDebug.visibility_score ?? '-'"></span></div>
-                                    <div>字幕时间窗: <span class="text-fg-strong" x-text="previewDebug.cue_window || '-'"></span></div>
-                                    <div>预览ID: <span class="text-fg-strong" x-text="previewDebug.preview_id || '-'"></span></div>
+                                    <div>请求字体: <span class="text-fg-strong" x-text="(previewDebug && previewDebug.font_requested) || '-'"></span></div>
+                                    <div>实际字体: <span class="text-fg-strong" x-text="(previewDebug && previewDebug.font_used) || '-'"></span></div>
+                                    <div>可见性评分: <span class="text-fg-strong" x-text="(previewDebug && previewDebug.visibility_score) ?? '-'"></span></div>
+                                    <div>字幕时间窗: <span class="text-fg-strong" x-text="(previewDebug && previewDebug.cue_window) || '-'"></span></div>
+                                    <div>预览ID: <span class="text-fg-strong" x-text="(previewDebug && previewDebug.preview_id) || '-'"></span></div>
                                 </div>
                             </details>
                         </div>
                     </div>
 
                     <!-- 加工选项（仅 dub_and_copy / full 时显示） -->
-                    <div x-show="scope === 'dub_and_copy' || scope === 'full'" x-transition x-cloak>
+                    <div x-show="isCreationScope()" x-transition x-cloak class="space-y-5">
                         <div class="h-px bg-border"></div>
                         <div class="mt-5">
                             <label class="block text-[13px] font-medium text-fg-strong mb-2">加工选项</label>
                             <div class="space-y-2">
                                 <label class="flex items-center gap-2.5 text-[14px] cursor-pointer">
                                     <input type="hidden" name="create_clips" value="false" />
-                                    <input type="checkbox" name="create_clips" value="true" checked class="w-4 h-4 rounded accent-fg-strong" />
+                                    <input type="checkbox" name="create_clips" value="true" x-model="createClips" class="w-4 h-4 rounded accent-fg-strong" />
                                     <span>生成短视频切片</span>
                                 </label>
                                 <label class="flex items-center gap-2.5 text-[14px] cursor-pointer">
                                     <input type="hidden" name="create_article" value="false" />
-                                    <input type="checkbox" name="create_article" value="true" checked class="w-4 h-4 rounded accent-fg-strong" />
+                                    <input type="checkbox" name="create_article" value="true" x-model="createArticle" class="w-4 h-4 rounded accent-fg-strong" />
                                     <span>生成图文文章</span>
                                 </label>
+                            </div>
+                        </div>
+
+                        <div class="rounded-2xl border border-border bg-white/70 px-4 py-4">
+                            <div class="flex items-center justify-between gap-3 mb-3">
+                                <div>
+                                    <div class="text-[13px] font-medium text-fg-strong">创作配置</div>
+                                    <div class="text-[12px] text-fg-sub mt-1">高光切片、裁剪策略、平台适配和成片包装参数</div>
+                                </div>
+                                <span class="px-2.5 py-1 rounded-full bg-muted text-[11px] text-fg font-medium">短视频加工</span>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">高光片段数</label>
+                                    <input type="number" name="creation_clip_count" min="1" max="10" x-model.number="creation.clip_count"
+                                           class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">审核模式</label>
+                                    <select name="creation_review_mode" x-model="creation.review_mode"
+                                            class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none">
+                                        <option value="required">发布前审核</option>
+                                        <option value="none">无需审核</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">片段最短时长（秒）</label>
+                                    <input type="number" name="creation_duration_min" min="10" max="180" x-model.number="creation.duration_min"
+                                           class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">片段最长时长（秒）</label>
+                                    <input type="number" name="creation_duration_max" min="10" max="300" x-model.number="creation.duration_max"
+                                           class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">裁剪模式</label>
+                                    <select name="creation_crop_mode" x-model="creation.crop_mode"
+                                            class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none">
+                                        <option value="smart">智能裁剪</option>
+                                        <option value="center">中心裁剪</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">转场方式</label>
+                                    <select name="creation_transition" x-model="creation.transition"
+                                            class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none">
+                                        <option value="fade">淡入淡出</option>
+                                        <option value="none">无转场</option>
+                                    </select>
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-[12px] text-fg-sub mb-1">目标平台</label>
+                                    <div class="grid grid-cols-3 gap-2">
+                                        <label class="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-[13px] text-fg cursor-pointer">
+                                            <input type="checkbox" name="creation_platforms" value="douyin" x-model="creation.platforms" class="w-4 h-4 rounded accent-fg-strong" />
+                                            <span>抖音</span>
+                                        </label>
+                                        <label class="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-[13px] text-fg cursor-pointer">
+                                            <input type="checkbox" name="creation_platforms" value="xiaohongshu" x-model="creation.platforms" class="w-4 h-4 rounded accent-fg-strong" />
+                                            <span>小红书</span>
+                                        </label>
+                                        <label class="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-[13px] text-fg cursor-pointer">
+                                            <input type="checkbox" name="creation_platforms" value="bilibili" x-model="creation.platforms" class="w-4 h-4 rounded accent-fg-strong" />
+                                            <span>B 站</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">背景音乐路径</label>
+                                    <input type="text" name="creation_bgm_path" x-model="creation.bgm_path" placeholder="/Users/.../bgm.mp3"
+                                           class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong placeholder:text-fg-faint outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">BGM 音量</label>
+                                    <input type="number" name="creation_bgm_volume" min="0" max="1" step="0.01" x-model.number="creation.bgm_volume"
+                                           class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">片头路径</label>
+                                    <input type="text" name="creation_intro_path" x-model="creation.intro_path" placeholder="/Users/.../intro.mp4"
+                                           class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong placeholder:text-fg-faint outline-none" />
+                                </div>
+                                <div>
+                                    <label class="block text-[12px] text-fg-sub mb-1">片尾路径</label>
+                                    <input type="text" name="creation_outro_path" x-model="creation.outro_path" placeholder="/Users/.../outro.mp4"
+                                           class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong placeholder:text-fg-faint outline-none" />
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-[12px] text-fg-sub mb-1">转场时长（秒）</label>
+                                    <input type="number" name="creation_transition_duration" min="0" max="3" step="0.05" x-model.number="creation.transition_duration"
+                                           class="w-full h-9 px-3 rounded-xl border border-border text-[13px] text-fg-strong outline-none" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="rounded-2xl border border-border bg-muted/40 px-4 py-4">
+                            <div class="text-[13px] font-medium text-fg-strong">本次创作将生成</div>
+                            <div class="mt-2 text-[13px] leading-6 text-fg-sub space-y-1">
+                                <div>· <span x-text="createClips ? creation.clip_count : 0"></span> 条高光短视频，单条 <span x-text="creation.duration_min"></span>–<span x-text="creation.duration_max"></span> 秒</div>
+                                <div>· 使用 <span x-text="creation.crop_mode === 'smart' ? '智能裁剪' : '中心裁剪'"></span>，目标平台：<span x-text="selectedPlatformsLabel()"></span></div>
+                                <div>· <span x-text="creation.review_mode === 'required' ? '发布前需要人工审核' : '创作完成后可直接发布'"></span></div>
+                                <div x-show="creation.bgm_path">· 成片混入背景音乐：<span class="text-fg-strong" x-text="creation.bgm_path"></span></div>
+                                <div x-show="creation.intro_path || creation.outro_path">· 自动拼接 <span x-text="creation.intro_path ? '片头' : ''"></span><span x-show="creation.intro_path && creation.outro_path"> + </span><span x-text="creation.outro_path ? '片尾' : ''"></span></div>
                             </div>
                         </div>
                     </div>
@@ -210,8 +314,7 @@
 
         <!-- Batch Mode -->
         <div x-show="mode === 'batch'" x-transition x-cloak>
-            <form hx-post="/api/tasks/batch-create" hx-swap="none"
-                  hx-on::after-request="if(event.detail.successful) { showToast('批量任务创建成功，等待 Worker 处理', 'success'); setTimeout(function(){location.href='/tasks'},800); }">
+            <form method="post" action="/api/tasks/batch-create">
                 <div class="space-y-5">
                     <div>
                         <label class="block text-[13px] font-medium text-fg-strong mb-1.5">URL 列表（每行一个）</label>
@@ -243,28 +346,28 @@
                         <label class="block text-[13px] font-medium text-fg-strong mb-2">任务范围</label>
                         <div class="grid grid-cols-2 gap-2">
                             <label class="relative cursor-pointer">
-                                <input type="radio" name="task_scope" value="subtitle_only" class="sr-only peer" />
+                                <input type="radio" name="task_scope" value="subtitle_only" class="sr-only peer" @change="setScope('subtitle_only')" />
                                 <div class="rounded-2xl border-2 border-border px-3 py-2
                                             peer-checked:border-black peer-checked:bg-muted-dark transition">
                                     <div class="text-[13px] font-semibold text-fg-strong">仅翻译字幕</div>
                                 </div>
                             </label>
                             <label class="relative cursor-pointer">
-                                <input type="radio" name="task_scope" value="subtitle_dub" class="sr-only peer" />
+                                <input type="radio" name="task_scope" value="subtitle_dub" class="sr-only peer" @change="setScope('subtitle_dub')" />
                                 <div class="rounded-2xl border-2 border-border px-3 py-2
                                             peer-checked:border-black peer-checked:bg-muted-dark transition">
                                     <div class="text-[13px] font-semibold text-fg-strong">翻译+配音</div>
                                 </div>
                             </label>
                             <label class="relative cursor-pointer">
-                                <input type="radio" name="task_scope" value="dub_and_copy" class="sr-only peer" />
+                                <input type="radio" name="task_scope" value="dub_and_copy" class="sr-only peer" @change="setScope('dub_and_copy')" />
                                 <div class="rounded-2xl border-2 border-border px-3 py-2
                                             peer-checked:border-black peer-checked:bg-muted-dark transition">
                                     <div class="text-[13px] font-semibold text-fg-strong">翻译+配音+文案</div>
                                 </div>
                             </label>
                             <label class="relative cursor-pointer">
-                                <input type="radio" name="task_scope" value="full" class="sr-only peer" checked />
+                                <input type="radio" name="task_scope" value="full" class="sr-only peer" checked @change="setScope('full')" />
                                 <div class="rounded-2xl border-2 border-border px-3 py-2
                                             peer-checked:border-black peer-checked:bg-muted-dark transition">
                                     <div class="text-[13px] font-semibold text-fg-strong">全流程</div>
@@ -301,10 +404,26 @@ function vfTaskForm() {
         youtubeUrl: '',
         sourceLang: 'en',
         targetLang: 'zh_cn',
+        createClips: true,
+        createArticle: true,
         previewLoading: false,
         previewUrl: '',
         previewError: '',
         previewDebug: null,
+        creation: {
+            clip_count: 5,
+            duration_min: 30,
+            duration_max: 90,
+            crop_mode: 'smart',
+            review_mode: 'required',
+            platforms: ['douyin', 'xiaohongshu', 'bilibili'],
+            bgm_path: '',
+            bgm_volume: 0.18,
+            intro_path: '',
+            outro_path: '',
+            transition: 'fade',
+            transition_duration: 0.35
+        },
         style: {
             cn_font_size: 26,
             en_font_size: 20,
@@ -322,6 +441,75 @@ function vfTaskForm() {
                     this.style = Object.assign({}, this.style, payload.subtitle_style);
                 }
             } catch (_) {}
+        },
+        setScope(scope) {
+            this.scope = scope;
+            if (this.isCreationScope()) {
+                this.createClips = true;
+                this.createArticle = true;
+                if (!this.creation.platforms || this.creation.platforms.length === 0) {
+                    this.creation.platforms = ['douyin', 'xiaohongshu', 'bilibili'];
+                }
+                return;
+            }
+            this.createClips = false;
+            this.createArticle = false;
+        },
+        isCreationScope() {
+            return this.scope === 'dub_and_copy' || this.scope === 'full';
+        },
+        selectedPlatformsLabel() {
+            const labels = { douyin: '抖音', xiaohongshu: '小红书', bilibili: 'B 站' };
+            const platforms = Array.isArray(this.creation.platforms) ? this.creation.platforms : [];
+            if (platforms.length === 0) return '未选择';
+            return platforms.map((item) => labels[item] || item).join(' / ');
+        },
+        async submitSingleTask() {
+            if (!this.youtubeUrl || !this.youtubeUrl.trim()) {
+                showToast('请先填写视频链接', 'error');
+                return;
+            }
+
+            const payload = {
+                source_url: this.youtubeUrl.trim(),
+                source_lang: this.sourceLang,
+                target_lang: this.targetLang,
+                task_scope: this.scope,
+                enable_short_clips: !!this.createClips,
+                enable_article: !!this.createArticle,
+                subtitle_style: this.style,
+                creation_config: {
+                    clip_count: this.creation.clip_count,
+                    duration_min: this.creation.duration_min,
+                    duration_max: this.creation.duration_max,
+                    crop_mode: this.creation.crop_mode,
+                    review_mode: this.creation.review_mode,
+                    platforms: this.creation.platforms,
+                    bgm_path: this.creation.bgm_path,
+                    bgm_volume: this.creation.bgm_volume,
+                    intro_path: this.creation.intro_path,
+                    outro_path: this.creation.outro_path,
+                    transition: this.creation.transition,
+                    transition_duration: this.creation.transition_duration,
+                },
+            };
+
+            try {
+                const resp = await fetch('/api/tasks/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await resp.json();
+                if (!resp.ok) {
+                    showToast((result && result.detail) ? String(result.detail) : '任务创建失败', 'error');
+                    return;
+                }
+                showToast('任务创建成功，等待 Worker 处理', 'success');
+                setTimeout(() => { window.location.href = '/tasks'; }, 250);
+            } catch (_) {
+                showToast('任务创建请求失败，请检查服务状态', 'error');
+            }
         },
         async previewSubtitle() {
             this.previewError = '';
