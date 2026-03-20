@@ -4,6 +4,7 @@
 """
 import asyncio
 import logging
+import time
 from typing import Optional
 
 from core.task import Task, TaskState, TaskStore
@@ -12,6 +13,7 @@ from core.config import Config
 from production.pipeline import ProductionPipeline
 from factory.pipeline import FactoryPipeline
 from distribute.scheduler import PublishScheduler
+from source.youtube_monitor import YouTubeMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +33,14 @@ class Orchestrator:
         factory: Optional[FactoryPipeline] = None,
         scheduler: Optional[PublishScheduler] = None,
         notifier: Optional[NotificationManager] = None,
+        monitor: Optional[YouTubeMonitor] = None,
     ):
         self.task_store = task_store or TaskStore()
         self.production = production or ProductionPipeline(task_store=self.task_store)
         self.factory = factory or FactoryPipeline(task_store=self.task_store)
         self.scheduler = scheduler or PublishScheduler(task_store=self.task_store)
         self.notifier = notifier or NotificationManager()
+        self.monitor = monitor  # None 表示未启用频道监控
 
         self._running = False
         self._max_concurrent = Config().get("tasks", "max_concurrent", default=2)
@@ -157,6 +161,9 @@ class Orchestrator:
 
         while self._running:
             try:
+                # 检查频道监控（如果已启用）
+                await self._check_monitor()
+
                 # 重新加载任务数据（Web进程可能创建了新任务）
                 self.task_store._load()
 
@@ -210,6 +217,62 @@ class Orchestrator:
         """停止编排器"""
         self._running = False
         logger.info("🛑 编排器已停止")
+
+    async def _check_monitor(self):
+        """检查频道监控，为新视频自动创建任务"""
+        if not self.monitor:
+            return
+
+        for channel in self.monitor.channels:
+            if not self.monitor.should_check(channel):
+                continue
+
+            try:
+                new_videos = await self.monitor.check_channel(channel.channel_id)
+                channel.last_checked_at = time.time()
+                channel.consecutive_failures = 0
+
+                for video in new_videos:
+                    video_url = video.get("url", "")
+                    if not video_url:
+                        continue
+
+                    if self.monitor.is_duplicate(video_url, self.task_store):
+                        continue
+
+                    # 时长过滤
+                    duration = video.get("duration", 0) or 0
+                    if channel.max_video_duration > 0 and duration > channel.max_video_duration:
+                        logger.info(f"跳过超时长视频: {video.get('title', '')} ({duration}s)")
+                        continue
+                    if channel.min_video_duration > 0 and duration < channel.min_video_duration:
+                        logger.info(f"跳过过短视频: {video.get('title', '')} ({duration}s)")
+                        continue
+
+                    self.task_store.create(
+                        source_url=video_url,
+                        source_title=video.get("title", ""),
+                        source_lang=channel.default_source_lang,
+                        target_lang=channel.default_target_lang,
+                        task_scope=channel.default_scope,
+                        priority=channel.default_priority,
+                    )
+                    self.monitor.mark_seen(video_url)
+                    self.monitor._auto_created_count += 1
+                    logger.info(
+                        f"自动创建任务: {video.get('title', '')} "
+                        f"(频道: {channel.name or channel.channel_id})"
+                    )
+
+            except Exception as e:
+                channel.consecutive_failures += 1
+                channel.last_checked_at = time.time()
+                logger.error(
+                    f"检查频道异常 {channel.name or channel.channel_id}: {e} "
+                    f"(连续失败: {channel.consecutive_failures})"
+                )
+
+        self.monitor._save_state()
 
     async def close(self):
         """关闭所有资源"""
