@@ -18,6 +18,10 @@ dependencies = [
     "scenedetect>=0.6.0",
     "librosa>=0.10.0",
     "ultralytics>=8.0.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "aiosqlite>=0.20.0",
 ]
 
 [build-system]

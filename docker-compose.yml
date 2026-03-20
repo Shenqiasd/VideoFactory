@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: video_factory
+      POSTGRES_USER: vf
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-changeme}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vf"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   api:
     build: .
     ports:
@@ -13,11 +29,15 @@ services:
       - .env
     environment:
       - VF_CONFIG=/app/config/settings.yaml
+      - DATABASE_URL=postgresql+asyncpg://vf:${PG_PASSWORD:-changeme}@postgres/video_factory
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/api/system/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   worker:
@@ -31,11 +51,15 @@ services:
       - .env
     environment:
       - VF_CONFIG=/app/config/settings.yaml
+      - DATABASE_URL=postgresql+asyncpg://vf:${PG_PASSWORD:-changeme}@postgres/video_factory
     depends_on:
       api:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
+  pg-data:
   vf-data:
   vf-working:

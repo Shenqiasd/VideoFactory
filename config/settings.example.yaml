@@ -107,6 +107,13 @@ storage:
     working_dir: "~/.video-factory/working"
     output_dir: "~/.video-factory/output"
 
+# 数据库配置
+database:
+  # PostgreSQL (生产环境):
+  # url: "postgresql+asyncpg://vf:password@localhost:5432/video_factory"
+  # SQLite (开发环境, 默认):
+  url: ""
+
 # 发布配置
 distribute:
   auto_publish: false
