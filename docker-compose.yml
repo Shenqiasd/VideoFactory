@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./config:/app/config:ro
+      - vf-data:/app/data
+      - vf-working:/root/.video-factory
+    env_file:
+      - .env
+    environment:
+      - VF_CONFIG=/app/config/settings.yaml
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/api/system/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: python workers/main.py
+    volumes:
+      - ./config:/app/config:ro
+      - vf-data:/app/data
+      - vf-working:/root/.video-factory
+    env_file:
+      - .env
+    environment:
+      - VF_CONFIG=/app/config/settings.yaml
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  vf-data:
+  vf-working:

@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from core.project_naming import resolve_project_titles
 from core.task import Task, TaskState, TaskStore, normalize_creation_config
@@ -42,6 +42,12 @@ class RunProductionRequest(BaseModel):
     task_id: str = Field(..., description="任务ID")
 
 
+_ALLOWED_LANGS = {
+    "en", "zh_cn", "zh", "ja", "ko", "fr", "de", "es", "pt", "ru", "ar",
+    "en-us", "en-gb", "zh-cn", "zh-tw",
+}
+
+
 class SubmitAndRunRequest(BaseModel):
     """创建并运行请求"""
     source_url: str = Field(..., description="视频URL")
@@ -52,6 +58,31 @@ class SubmitAndRunRequest(BaseModel):
     embed_subtitle_type: str = Field("horizontal", description="字幕类型")
     subtitle_style: Optional[dict] = Field(None, description="字幕样式")
     creation_config: Optional[dict] = Field(None, description="创作配置")
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("source_url 不能为空")
+        if v.startswith(("http://", "https://", "/", "~")):
+            return v
+        raise ValueError("source_url 必须是 http/https URL 或绝对路径")
+
+    @field_validator("source_lang", "target_lang")
+    @classmethod
+    def validate_lang(cls, v):
+        normalized = v.lower().replace("-", "_")
+        if normalized not in {x.replace("-", "_") for x in _ALLOWED_LANGS}:
+            raise ValueError(f"不支持的语言代码: {v}")
+        return v
+
+    @field_validator("embed_subtitle_type")
+    @classmethod
+    def validate_embed_type(cls, v):
+        if v not in {"horizontal", "vertical", "none"}:
+            raise ValueError("embed_subtitle_type 必须是 horizontal/vertical/none 之一")
+        return v
 
 
 # ========== 后台任务 ==========

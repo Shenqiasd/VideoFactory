@@ -120,7 +120,7 @@ class QualityChecker:
                         cls._parse_srt_time_seconds(m.group(3)),
                     )
                 )
-            except Exception:
+            except (ValueError, IndexError):
                 continue
 
         if len(timings) < 2:
@@ -741,8 +741,13 @@ class ProductionPipeline:
                 source_lang=self._normalize_lang_code(source_lang),
                 target_lang=self._normalize_lang_code(target_lang),
             )
+        except (ConnectionError, TimeoutError, OSError) as exc:
+            logger.error("翻译服务异常，回退原文: %s (type=%s)", exc, type(exc).__name__)
+            self._translation_degraded = True
+            return content
         except Exception as exc:
-            logger.warning("文本翻译失败，回退原文: %s", exc)
+            logger.error("翻译未预期异常，回退原文: %s (type=%s)", exc, type(exc).__name__)
+            self._translation_degraded = True
             return content
         cleaned = SubtitleRepairer.sanitize_translation_text((translated or content).strip())
         return cleaned or content
@@ -967,6 +972,7 @@ class ProductionPipeline:
             bool: 是否成功完成
         """
         logger.info(f"🚀 开始生产管线: {task.task_id}")
+        self._translation_degraded = False
         working_dir = self.local_storage.get_task_working_dir(task.task_id)
 
         try:
@@ -995,7 +1001,7 @@ class ProductionPipeline:
             return task.state == TaskState.QC_PASSED.value
 
         except Exception as e:
-            logger.error(f"💥 生产管线异常: {task.task_id}: {e}")
+            logger.exception("💥 生产管线异常: %s", task.task_id)
             self._fail_task(task, str(e), "PRODUCTION_PIPELINE_EXCEPTION")
             await self.notifier.notify_error(task.task_id, str(e), "production_pipeline")
             return False
@@ -1221,7 +1227,17 @@ class ProductionPipeline:
     async def _step_qc(self, task: Task, working_dir: Path) -> bool:
         """Step 4: 质检"""
         self._mark_step(task, TaskState.QC_CHECKING.value)
-        qc_result = await self.qc.check(task, working_dir)
+
+        # 翻译降级检查：如果翻译过程中出现过异常回退，直接拒绝
+        if getattr(self, "_translation_degraded", False):
+            logger.error("翻译服务降级，QC 拒绝: %s", task.task_id)
+            qc_result = {
+                "passed": False,
+                "score": 0.0,
+                "details": "翻译服务降级，存在未翻译内容。请检查翻译服务状态后重试。",
+            }
+        else:
+            qc_result = await self.qc.check(task, working_dir)
 
         task.qc_score = qc_result["score"]
         task.qc_details = qc_result["details"]
