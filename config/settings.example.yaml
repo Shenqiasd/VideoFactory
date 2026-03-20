@@ -112,3 +112,9 @@ distribute:
   auto_publish: false
   social_auto_upload_path: ""
   account_dir: ""
+
+# 频道监控配置
+monitor:
+  enabled: false
+  default_check_interval: 3600
+  max_auto_tasks_per_day: 50
