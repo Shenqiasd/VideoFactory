@@ -8,7 +8,7 @@ from sqlalchemy import (
     Text,
     Integer,
     Float,
-    Boolean,
+    ForeignKey,
     Index,
 )
 
@@ -52,7 +52,7 @@ class PublishTaskModel(Base):
     task_id = Column(String, nullable=True)
     video_path = Column(String, nullable=False)
     platform = Column(String, nullable=False)
-    account_id = Column(String, nullable=False)
+    account_id = Column(String, ForeignKey("accounts.id"), nullable=False)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     tags = Column(Text, nullable=True)

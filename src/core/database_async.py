@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Optional, List
 
 from sqlalchemy import select, update, delete
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.db_engine import get_session_factory
