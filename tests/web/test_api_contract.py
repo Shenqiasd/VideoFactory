@@ -800,6 +800,8 @@ def test_asr_tts_settings_roundtrip(client, monkeypatch, tmp_path):
     import yaml
 
     src_config_path = Path(__file__).resolve().parents[2] / "config" / "settings.yaml"
+    if not src_config_path.exists():
+        src_config_path = Path(__file__).resolve().parents[2] / "config" / "settings.example.yaml"
     test_config_path = tmp_path / "settings.yaml"
     test_config_path.write_text(src_config_path.read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -958,6 +960,8 @@ def test_asr_tts_settings_get_normalizes_legacy_klic_values(client, monkeypatch,
     import yaml
 
     src_config_path = Path(__file__).resolve().parents[2] / "config" / "settings.yaml"
+    if not src_config_path.exists():
+        src_config_path = Path(__file__).resolve().parents[2] / "config" / "settings.example.yaml"
     test_config_path = tmp_path / "settings.yaml"
     config_data = yaml.safe_load(src_config_path.read_text(encoding="utf-8"))
     config_data.setdefault("asr", {})
@@ -1093,6 +1097,8 @@ def test_system_tts_test_endpoint(client, monkeypatch, tmp_path):
     import yaml
 
     src_config_path = Path(__file__).resolve().parents[2] / "config" / "settings.yaml"
+    if not src_config_path.exists():
+        src_config_path = Path(__file__).resolve().parents[2] / "config" / "settings.example.yaml"
     test_config_path = tmp_path / "settings.yaml"
     config_data = yaml.safe_load(src_config_path.read_text(encoding="utf-8"))
     config_data.setdefault("tts", {}).setdefault("volcengine", {})
