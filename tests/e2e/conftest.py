@@ -79,6 +79,7 @@ def live_server(tmp_path_factory):
     env = os.environ.copy()
     env["HOME"] = str(home_dir)
     env["VF_DB_PATH"] = str(home_dir / "video_factory.db")
+    env["VF_DISABLE_TITLE_RESOLVE"] = "1"
     env["PYTHONPATH"] = os.pathsep.join([str(PROJECT_ROOT), str(PROJECT_ROOT / "src")])
 
     base_url = "http://127.0.0.1:9010"

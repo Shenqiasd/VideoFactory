@@ -28,6 +28,19 @@ _SRT_BLOCK_PATTERN = re.compile(
     r"(.*?)(?=\n\s*\n\d+\s*\n|\Z)",
     re.S,
 )
+_TRANSLATION_META_PREFIX_PATTERNS = (
+    re.compile(r"^\s*以下是.{0,24}?翻译.{0,12}?[:：]\s*", re.IGNORECASE),
+    re.compile(r"^\s*以下为.{0,12}译文[:：]\s*", re.IGNORECASE),
+    re.compile(r"^\s*(?:译文如下|翻译如下)[:：]\s*", re.IGNORECASE),
+)
+_TRANSLATION_META_FRAGMENT_PATTERNS = (
+    re.compile(r"[（(]\s*注[:：][^）)]*[）)]"),
+    re.compile(r"翻译中保留了[^。！？!?]*", re.IGNORECASE),
+    re.compile(r"根据中文表达习惯调整了句式结构[^。！？!?]*", re.IGNORECASE),
+    re.compile(r"译为[“\"'][^”\"']+[”\"'](?:。?[）)])?", re.IGNORECASE),
+    re.compile(r"以下是将英文句子翻译成中文(?:（简体）)?的示例[:：]?\s*", re.IGNORECASE),
+)
+_MARKDOWN_ARTIFACT_PATTERN = re.compile(r"[*`#]+")
 
 
 def _parse_srt(path: Path) -> List[Dict[str, Any]]:
@@ -94,8 +107,53 @@ def _normalize_text(text: str) -> str:
     return t
 
 
+def _contains_translation_meta(text: str) -> bool:
+    content = str(text or "").strip()
+    if not content:
+        return False
+    return any(pattern.search(content) for pattern in _TRANSLATION_META_PREFIX_PATTERNS) or any(
+        pattern.search(content) for pattern in _TRANSLATION_META_FRAGMENT_PATTERNS
+    )
+
+
+def _sanitize_translation_text(text: str) -> str:
+    content = str(text or "").strip()
+    if not content:
+        return ""
+
+    cleaned = content
+    for _ in range(3):
+        before = cleaned
+        for pattern in _TRANSLATION_META_PREFIX_PATTERNS:
+            cleaned = pattern.sub("", cleaned).strip()
+        if cleaned == before:
+            break
+
+    for pattern in _TRANSLATION_META_FRAGMENT_PATTERNS:
+        cleaned = pattern.sub("", cleaned)
+
+    cleaned = re.sub(r"^[（(]?\s*注[:：]?\s*", "", cleaned).strip()
+    cleaned = _MARKDOWN_ARTIFACT_PATTERN.sub("", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s+([，。！？；：、,.!?;:])", r"\1", cleaned)
+    if cleaned in {"并", "并且", "而且"}:
+        return ""
+    return cleaned.strip()
+
+
 def _count_zh_chars(text: str) -> int:
     return sum(1 for ch in (text or "") if "\u4e00" <= ch <= "\u9fff")
+
+
+def _count_ascii_letters(text: str) -> int:
+    return sum(1 for ch in (text or "") if ch.isascii() and ch.isalpha())
+
+
+def _is_english_residue(text: str) -> bool:
+    content = str(text or "").strip()
+    if not content:
+        return False
+    return _count_zh_chars(content) == 0 and _count_ascii_letters(content) >= 8
 
 
 def _line_text(entry: Dict[str, Any], prefer: str = "first") -> str:
@@ -153,11 +211,22 @@ class SubtitleRepairer:
         self.max_effective_batch_size = int(
             cfg.get("quality", "translation_repair_max_effective_batch_size", default=20)
         )
+        self.max_english_residue_ratio = float(
+            cfg.get("quality", "translation_max_english_residue_ratio", default=0.01)
+        )
         self.strict_json = bool(
             cfg.get("translation", "strict_json", default=cfg.get("llm", "strict_json", default=False))
         )
 
         self._client: Optional[httpx.AsyncClient] = None
+
+    @staticmethod
+    def contains_translation_meta(text: str) -> bool:
+        return _contains_translation_meta(text)
+
+    @staticmethod
+    def sanitize_translation_text(text: str) -> str:
+        return _sanitize_translation_text(text)
 
     def _runtime_missing_reason(self) -> str:
         if self.translation_provider == "local_llm":
@@ -185,6 +254,108 @@ class SubtitleRepairer:
         if self._client:
             await self._client.aclose()
             self._client = None
+
+    async def _translate_line_with_context(
+        self,
+        *,
+        index: int,
+        lines: Sequence[str],
+        source_lang: str,
+        target_lang: str,
+    ) -> str:
+        if self.translation_provider != "volcengine_ark":
+            return ""
+
+        current = str(lines[index] or "").strip()
+        if not current:
+            return ""
+
+        prev_line = " ".join(
+            str(lines[i] or "").strip()
+            for i in range(max(0, index - 2), index)
+            if str(lines[i] or "").strip()
+        )
+        next_line = " ".join(
+            str(lines[i] or "").strip()
+            for i in range(index + 1, min(len(lines), index + 3))
+            if str(lines[i] or "").strip()
+        )
+        prompt = "\n".join(
+            [
+                f"前文: {prev_line}",
+                f"当前: {current}",
+                f"后文: {next_line}",
+            ]
+        ).strip()
+
+        client = await self._get_client()
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        last_error = ""
+        for attempt in range(self.max_retries + 1):
+            try:
+                payload = VolcengineArkTranslator.build_translation_payload(
+                    model=self.model,
+                    text=prompt,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                )
+                resp = await client.post(
+                f"{self.api_base.rstrip('/')}/responses",
+                    headers=headers,
+                    json=payload,
+                )
+                if resp.status_code == 429:
+                    wait_s = self._extract_retry_seconds(resp.text, default=2.0 + attempt * 1.5)
+                    last_error = f"HTTP 429, backoff {wait_s:.1f}s"
+                    await asyncio.sleep(wait_s)
+                    continue
+                if resp.status_code != 200:
+                    last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    continue
+                translated = self.sanitize_translation_text(
+                    VolcengineArkTranslator.extract_output_text(resp.json())
+                )
+                cleaned = self._extract_context_line_translation(translated)
+                if cleaned:
+                    return cleaned
+                last_error = "响应解析失败"
+            except Exception as exc:  # pragma: no cover
+                last_error = str(exc)
+
+        logger.warning("字幕上下文补翻失败，回退原文: idx=%s error=%s", index, last_error)
+        return ""
+
+    @staticmethod
+    def _extract_context_line_translation(raw: str) -> str:
+        lines = [line.strip() for line in str(raw or "").splitlines() if line.strip()]
+        if not lines:
+            return ""
+
+        def _strip_prefix(line: str) -> str:
+            line = re.sub(r"^\[[^\]]+\]\s*", "", line).strip()
+            line = re.sub(
+                r"^(?:上一句|上一段|前文|之前|现在|当前句|当前段|当前|下一句|下一段|后文|接下来|背景|后续|prev|curr|next|previous|current)\s*[：:]\s*",
+                "",
+                line,
+                flags=re.IGNORECASE,
+            ).strip()
+            return line
+
+        for line in lines:
+            if re.search(r"(?:当前|现在|curr|current)", line, flags=re.IGNORECASE):
+                cleaned = _strip_prefix(line)
+                if cleaned:
+                    return cleaned
+
+        if len(lines) >= 2:
+            cleaned = _strip_prefix(lines[1])
+            if cleaned:
+                return cleaned
+
+        return _strip_prefix(lines[0])
 
     async def translate_lines(
         self,
@@ -354,7 +525,11 @@ class SubtitleRepairer:
                             len(parsed),
                         )
                         parsed = list(parsed)[:len(texts)] + list(texts[len(parsed):])
-                    return [str(x).strip() for x in parsed[:len(texts)]]
+                    cleaned_items: List[str] = []
+                    for idx, value in enumerate(parsed[:len(texts)]):
+                        cleaned = self.sanitize_translation_text(str(value).strip())
+                        cleaned_items.append(cleaned or str(texts[idx]).strip())
+                    return cleaned_items
                 last_error = "响应解析失败"
 
             except Exception as e:  # pragma: no cover
@@ -419,7 +594,9 @@ class SubtitleRepairer:
                         last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
                         continue
 
-                    translated = VolcengineArkTranslator.extract_output_text(resp.json())
+                    translated = self.sanitize_translation_text(
+                        VolcengineArkTranslator.extract_output_text(resp.json())
+                    )
                     if translated:
                         return translated
                     last_error = "响应解析失败"
@@ -450,7 +627,7 @@ class SubtitleRepairer:
             return False
         same = bool(origin and t and _normalize_text(origin) == _normalize_text(t))
         has_zh = _count_zh_chars(t) > 0
-        return same or (not has_zh)
+        return same or (not has_zh) or _is_english_residue(t) or _contains_translation_meta(t)
 
     @classmethod
     def _parse_translation_response(cls, raw: str, expected: int) -> Optional[List[str]]:
@@ -555,7 +732,7 @@ class SubtitleRepairer:
         target_entries = target_entries[:total]
 
         origin_lines = [_line_text(e, prefer="all") for e in origin_entries]
-        target_lines = [_line_text(e, prefer="all") for e in target_entries]
+        target_lines = [self.sanitize_translation_text(_line_text(e, prefer="all")) for e in target_entries]
 
         zh_ratio, unchanged_ratio, need_repair = self._evaluate_pairs(
             origin_lines,
@@ -579,10 +756,30 @@ class SubtitleRepairer:
                 )
 
                 for idx, translated_text in zip(batch_indexes, translated):
-                    cleaned = (translated_text or "").strip()
+                    cleaned = self.sanitize_translation_text(translated_text)
                     if cleaned:
                         target_lines[idx] = cleaned
                         if not self._line_needs_repair(origin_lines[idx], cleaned, target_lang):
+                            repaired_lines += 1
+
+                # 火山翻译对碎片句有时会保留英文残留；这类行再用前后文做一次定点补翻。
+                context_indexes = [
+                    idx
+                    for idx in batch_indexes
+                    if self._line_needs_repair(origin_lines[idx], target_lines[idx], target_lang)
+                ]
+                if self.translation_provider == "volcengine_ark":
+                    for idx in context_indexes:
+                        contextual = await self._translate_line_with_context(
+                            index=idx,
+                            lines=origin_lines,
+                            source_lang=source_lang,
+                            target_lang=target_lang,
+                        )
+                        if not contextual:
+                            continue
+                        target_lines[idx] = contextual
+                        if not self._line_needs_repair(origin_lines[idx], contextual, target_lang):
                             repaired_lines += 1
 
             # 写回 target 字幕
@@ -609,21 +806,25 @@ class SubtitleRepairer:
             target_lines,
             target_lang=target_lang,
         )
+        english_residue_count = sum(1 for line in target_lines if _is_english_residue(line))
+        english_residue_ratio = english_residue_count / total if total else 0.0
 
         passed = (
             zh_ratio2 >= self.min_zh_line_ratio
             and unchanged_ratio2 <= self.max_unchanged_ratio
+            and english_residue_ratio <= self.max_english_residue_ratio
         )
 
         if passed:
             message = (
                 f"字幕通过: zh_ratio={zh_ratio2:.2%}, unchanged={unchanged_ratio2:.2%}, "
-                f"repaired_lines={repaired_lines}"
+                f"english_residue={english_residue_count}, repaired_lines={repaired_lines}"
             )
         else:
             message = (
                 f"字幕未达标: zh_ratio={zh_ratio2:.2%} (<{self.min_zh_line_ratio:.0%}) 或 "
-                f"unchanged={unchanged_ratio2:.2%} (>{self.max_unchanged_ratio:.0%})"
+                f"unchanged={unchanged_ratio2:.2%} (>{self.max_unchanged_ratio:.0%}) 或 "
+                f"english_residue={english_residue_ratio:.2%} (>{self.max_english_residue_ratio:.0%})"
             )
 
         return RepairResult(

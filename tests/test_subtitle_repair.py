@@ -70,6 +70,7 @@ async def test_subtitle_repair_fails_when_quality_still_low(monkeypatch, tmp_pat
     repairer = SubtitleRepairer()
     repairer.min_zh_line_ratio = 0.95
     repairer.max_unchanged_ratio = 0.05
+    repairer.translation_provider = "llm"
 
     async def _fake_translate(texts, target_lang, source_lang="auto"):
         return ["Hello world", "How are you"]
@@ -79,6 +80,147 @@ async def test_subtitle_repair_fails_when_quality_still_low(monkeypatch, tmp_pat
 
     assert result.passed is False
     assert "字幕未达标" in result.message
+
+
+@pytest.mark.asyncio
+async def test_subtitle_repair_uses_context_for_english_residue(monkeypatch, tmp_path):
+    origin = tmp_path / "origin_language_srt.srt"
+    target = tmp_path / "target_language_srt.srt"
+    bilingual = tmp_path / "bilingual_srt.srt"
+
+    _write_srt(
+        origin,
+        [
+            "every year thousands of new songs are",
+            "released and every year thousands of old",
+            "songs find new life in an everchanging",
+        ],
+    )
+    _write_srt(
+        target,
+        [
+            "每年都有成千上万首新歌问世。",
+            "released and every year thousands of old",
+            "songs find new life in an everchanging",
+        ],
+    )
+    _write_srt(
+        bilingual,
+        [
+            "每年都有成千上万首新歌问世。\nevery year thousands of new songs are",
+            "released and every year thousands of old\nreleased and every year thousands of old",
+            "songs find new life in an everchanging\nsongs find new life in an everchanging",
+        ],
+    )
+
+    class _Task:
+        target_lang = "zh_cn"
+        source_lang = "en"
+
+    repairer = SubtitleRepairer()
+    repairer.translation_provider = "volcengine_ark"
+    repairer.api_base = "https://ark.cn-beijing.volces.com/api/v3"
+    repairer.model = "doubao-seed-translation-250915"
+    repairer.api_key = "dummy"
+
+    async def _fake_translate(texts, target_lang, source_lang="auto"):
+        del target_lang, source_lang
+        return list(texts)
+
+    async def _fake_context_translate(*, index, lines, source_lang, target_lang):
+        del lines, source_lang, target_lang
+        mapping = {
+            1: "每年也有成千上万首老歌焕发新生。",
+            2: "在不断变化的文化环境中重新获得生命力。",
+        }
+        return mapping.get(index, "")
+
+    monkeypatch.setattr(repairer, "_translate_batch", _fake_translate)
+    monkeypatch.setattr(repairer, "_translate_line_with_context", _fake_context_translate)
+    result = await repairer.repair_if_needed(_Task(), tmp_path)
+
+    assert result.passed is True
+    target_content = target.read_text(encoding="utf-8")
+    assert "每年也有成千上万首老歌焕发新生。" in target_content
+    assert "在不断变化的文化环境中重新获得生命力。" in target_content
+
+
+def test_extract_context_line_translation_prefers_current_line():
+    raw = (
+        "[上一句] 每年都有成千上万首新歌发布，\n"
+        "[当前句] 每年也有成千上万首老歌在不断变化的音乐环境中焕发新生。\n"
+        "[下一句] 音乐文化不断变化。\n"
+    )
+    assert (
+        SubtitleRepairer._extract_context_line_translation(raw)
+        == "每年也有成千上万首老歌在不断变化的音乐环境中焕发新生。"
+    )
+
+
+def test_sanitize_translation_text_strips_meta_artifacts():
+    raw = (
+        "以下是您要求翻译的英文文本： **视频由 Incog 赞助。** "
+        "（注：翻译中保留了品牌名“Incog”，并根据中文表达习惯调整了句式结构。）"
+    )
+
+    assert SubtitleRepairer.sanitize_translation_text(raw) == "视频由 Incog 赞助。"
+
+
+@pytest.mark.asyncio
+async def test_subtitle_repair_repairs_translation_meta_artifacts(monkeypatch, tmp_path):
+    origin = tmp_path / "origin_language_srt.srt"
+    target = tmp_path / "target_language_srt.srt"
+    bilingual = tmp_path / "bilingual_srt.srt"
+
+    _write_srt(
+        origin,
+        [
+            "this video is brought to you by incog go",
+            "to the link in the description to get",
+            "60% off an annual plan there's been a",
+            "question lingering in the back of my",
+        ],
+    )
+    _write_srt(
+        target,
+        [
+            "以下是您要求翻译的英文文本： **视频由 Incog 赞助。**",
+            "（注：翻译中保留了品牌名“Incog”，",
+            "并根据中文表达习惯调整了句式结构，",
+            "译为“一直有个问题在我脑海里挥之不去”。）",
+        ],
+    )
+    _write_srt(
+        bilingual,
+        [
+            "以下是您要求翻译的英文文本： **视频由 Incog 赞助。**\nthis video is brought to you by incog go",
+            "（注：翻译中保留了品牌名“Incog”，\nto the link in the description to get",
+            "并根据中文表达习惯调整了句式结构，\n60% off an annual plan there's been a",
+            "译为“一直有个问题在我脑海里挥之不去”。）\nquestion lingering in the back of my",
+        ],
+    )
+
+    class _Task:
+        target_lang = "zh_cn"
+        source_lang = "en"
+
+    repairer = SubtitleRepairer()
+
+    async def _fake_translate(texts, target_lang, source_lang="auto"):
+        del target_lang, source_lang
+        return [
+            "视频由 Incog 赞助。",
+            "点击描述中的链接。",
+            "即可享受年度计划六折优惠。",
+            "一个问题一直萦绕在我的脑海中。",
+        ]
+
+    monkeypatch.setattr(repairer, "_translate_batch", _fake_translate)
+    result = await repairer.repair_if_needed(_Task(), tmp_path)
+
+    assert result.passed is True
+    assert "以下是您要求翻译的英文文本" not in target.read_text(encoding="utf-8")
+    assert "注：" not in target.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

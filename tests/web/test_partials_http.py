@@ -32,6 +32,22 @@ def test_task_list_partial_accepts_status_filter(client):
     assert "text/html" in response.headers.get("content-type", "")
 
 
+def test_task_list_partial_exposes_delete_action(client):
+    created = client.post(
+        "/api/tasks/",
+        json={
+            "source_url": "https://www.youtube.com/watch?v=delete_case",
+            "source_title": "delete-title",
+        },
+    )
+
+    response = client.get("/web/partials/task_list")
+
+    assert response.status_code == 200
+    assert f'hx-delete="/api/tasks/{created.json()["task_id"]}"' in response.text
+    assert "删除" in response.text
+
+
 def test_task_list_active_filter_includes_downloaded_and_qc_passed(client):
     first = client.post(
         "/api/tasks/",
@@ -89,19 +105,25 @@ def test_active_and_task_list_partials_use_persisted_progress(client):
     assert 'style="width: 42%"' in list_response.text
 
 
-def test_active_tasks_partial_renders_task_source_title_or_url(client):
-    client.post(
+def test_active_tasks_partial_prefers_project_name(client):
+    created = client.post(
         "/api/tasks/",
         json={
             "source_url": "https://www.youtube.com/watch?v=active_title_case",
             "source_title": "active-title",
         },
     )
+    task_id = created.json()["task_id"]
+
+    store = tasks_routes.get_task_store()
+    task = store.get(task_id)
+    task.translated_title = "规范项目名"
+    store.update(task)
 
     response = client.get("/web/partials/active_tasks")
     assert response.status_code == 200
     html = response.text
-    assert "active-title" in html or "active_title_case" in html
+    assert "规范项目名" in html
 
 
 def test_task_list_partial_derives_platforms_from_publish_accounts(client):
@@ -126,6 +148,49 @@ def test_task_list_partial_derives_platforms_from_publish_accounts(client):
     assert "youtube" in response.text
 
 
+def test_task_list_partial_renders_cover_preview_and_summary(client, tmp_path):
+    created = client.post(
+        "/api/tasks/",
+        json={
+            "source_url": "https://www.youtube.com/watch?v=cover_summary_case",
+            "source_title": "cover-summary-title",
+        },
+    )
+    task_id = created.json()["task_id"]
+
+    cover_file = tmp_path / "cover.png"
+    long_video = tmp_path / "long_video.mp4"
+    cover_file.write_bytes(b"fake-cover")
+    long_video.write_bytes(b"fake-video")
+
+    store = tasks_routes.get_task_store()
+    task = store.get(task_id)
+    task.translated_title = "字幕任务项目名"
+    task.products = [
+        {
+            "type": "long_video",
+            "platform": "all",
+            "local_path": str(long_video),
+            "title": "字幕任务项目名",
+            "description": "这是任务列表里展示的视频简介，长度控制在两百字以内。",
+        },
+        {
+            "type": "cover",
+            "platform": "all",
+            "local_path": str(cover_file),
+            "metadata": {"cover_type": "horizontal"},
+        },
+    ]
+    store.update(task)
+
+    response = client.get("/web/partials/task_list")
+
+    assert response.status_code == 200
+    assert "这是任务列表里展示的视频简介" in response.text
+    assert f"/api/tasks/{task_id}/artifacts/{tasks_routes._make_artifact_id(str(cover_file))}/download?inline=1" in response.text
+    assert "<img" in response.text
+
+
 def test_recent_completed_partial_supports_float_timestamps_and_products(client, monkeypatch):
     created = client.post(
         "/api/tasks/",
@@ -140,6 +205,7 @@ def test_recent_completed_partial_supports_float_timestamps_and_products(client,
     task = store.get(task_id)
     task.state = TaskState.COMPLETED.value
     task.created_at = 1710000000.0
+    task.translated_title = "完成项目名"
     task.products = [{"type": "long_video", "platform": "all", "title": "completed-title"}]
     monkeypatch.setattr(task_module.time, "time", lambda: 1710003661.0)
     store.update(task)
@@ -147,7 +213,7 @@ def test_recent_completed_partial_supports_float_timestamps_and_products(client,
     response = client.get("/web/partials/recent_completed")
 
     assert response.status_code == 200
-    assert "completed-title" in response.text
+    assert "完成项目名" in response.text
     assert "1小时1分钟" in response.text
     assert "长视频" in response.text
 

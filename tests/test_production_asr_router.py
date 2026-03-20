@@ -9,7 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from asr import ASRResult  # noqa: E402
 from core.task import TaskState, TaskStore  # noqa: E402
+from production.global_translation_reviewer import GlobalReviewResult  # noqa: E402
 from production.pipeline import ProductionPipeline  # noqa: E402
+from production.sentence_regrouper import SentenceGroup, SentenceTranslationResult  # noqa: E402
 
 
 class NoopNotifier:
@@ -80,6 +82,54 @@ async def _repair_pass(task, working_dir):
     return RepairPassed()
 
 
+async def _global_review_pass(task, working_dir, *, groups, origin_text, target_text):
+    del working_dir, groups, origin_text
+    return GlobalReviewResult(
+        passed=True,
+        skipped=True,
+        fixed=False,
+        domain="general",
+        confidence=0.0,
+        message="skipped",
+        report={"status": "skipped", "passed": True},
+        translated_title=task.translated_title,
+        translated_description=task.translated_description,
+        target_text=target_text,
+    )
+
+
+async def _global_review_fail(task, working_dir, *, groups, origin_text, target_text):
+    del working_dir, groups, origin_text
+    return GlobalReviewResult(
+        passed=False,
+        skipped=False,
+        fixed=False,
+        domain="music",
+        confidence=0.99,
+        message="global review blocked",
+        report={"status": "failed", "passed": False},
+        translated_title=task.translated_title,
+        translated_description=task.translated_description,
+        target_text=target_text,
+        blocking_reason="global review blocked",
+    )
+
+
+async def _regroup_passthrough(entries, *, target_lang, source_lang, translate_lines):
+    origin_lines = [
+        " ".join(str(line).strip() for line in (entry.get("lines") or []) if str(line).strip()).strip()
+        for entry in entries
+    ]
+    target_lines = await translate_lines(origin_lines, target_lang, source_lang)
+    return SentenceTranslationResult(
+        cue_lines=target_lines,
+        groups=[
+            SentenceGroup(cue_indexes=[i], source_lines=[origin_lines[i]], source_text=origin_lines[i])
+            for i in range(len(origin_lines))
+        ],
+    )
+
+
 class FakeTTSResult:
     def __init__(self, audio_path: str):
         self.audio_path = audio_path
@@ -95,8 +145,10 @@ async def test_step_translate_uses_asr_router_and_generates_artifacts(tmp_path):
 
     pipeline = ProductionPipeline(task_store=store, notifier=NoopNotifier())
     pipeline.asr_router = RouterSuccess()  # type: ignore[assignment]
+    pipeline.sentence_regrouper.translate_entries = _regroup_passthrough  # type: ignore[method-assign]
     pipeline.subtitle_repairer.translate_lines = _translate_to_zh  # type: ignore[method-assign]
     pipeline.subtitle_repairer.repair_if_needed = _repair_pass  # type: ignore[method-assign]
+    pipeline.global_translation_reviewer.review = _global_review_pass  # type: ignore[method-assign]
     pipeline._safe_translate_text = _translate_text_passthrough  # type: ignore[method-assign]
 
     working_dir = tmp_path / task.task_id
@@ -113,7 +165,35 @@ async def test_step_translate_uses_asr_router_and_generates_artifacts(tmp_path):
     assert (working_dir / "target_language.txt").exists()
     assert task.subtitle_path.endswith("bilingual_srt.srt")
     assert task.transcript_text == "ZH:hello world\nZH:second line"
-    assert task.translated_title == "ZH:hello world"
+    assert task.translated_title == ""
+
+
+@pytest.mark.asyncio
+async def test_step_translate_uses_source_title_for_project_name(tmp_path):
+    store = TaskStore(store_path=str(tmp_path / "tasks.json"))
+    task = store.create(
+        source_url="https://www.youtube.com/watch?v=title_case",
+        source_title="Original Video Title",
+    )
+    task.state = TaskState.UPLOADING_SOURCE.value
+    task.enable_tts = False
+    store.update(task)
+
+    pipeline = ProductionPipeline(task_store=store, notifier=NoopNotifier())
+    pipeline.asr_router = RouterSuccess()  # type: ignore[assignment]
+    pipeline.sentence_regrouper.translate_entries = _regroup_passthrough  # type: ignore[method-assign]
+    pipeline.subtitle_repairer.translate_lines = _translate_to_zh  # type: ignore[method-assign]
+    pipeline.subtitle_repairer.repair_if_needed = _repair_pass  # type: ignore[method-assign]
+    pipeline.global_translation_reviewer.review = _global_review_pass  # type: ignore[method-assign]
+    pipeline._safe_translate_text = _translate_text_passthrough  # type: ignore[method-assign]
+
+    working_dir = tmp_path / task.task_id
+    working_dir.mkdir(parents=True, exist_ok=True)
+
+    ok = await pipeline._step_translate(task, working_dir)
+
+    assert ok is True
+    assert task.translated_title == "ZH:Original Video Title"
 
 
 @pytest.mark.asyncio
@@ -165,8 +245,10 @@ async def test_step_translate_with_tts_stays_in_self_managed_flow(tmp_path):
 
     pipeline = ProductionPipeline(task_store=store, notifier=NoopNotifier())
     pipeline.asr_router = RouterSuccess()  # type: ignore[assignment]
+    pipeline.sentence_regrouper.translate_entries = _regroup_passthrough  # type: ignore[method-assign]
     pipeline.subtitle_repairer.translate_lines = _translate_to_zh  # type: ignore[method-assign]
     pipeline.subtitle_repairer.repair_if_needed = _repair_pass  # type: ignore[method-assign]
+    pipeline.global_translation_reviewer.review = _global_review_pass  # type: ignore[method-assign]
     pipeline._safe_translate_text = _translate_text_passthrough  # type: ignore[method-assign]
 
     async def _fake_synthesize(**kwargs):
@@ -184,6 +266,7 @@ async def test_step_translate_with_tts_stays_in_self_managed_flow(tmp_path):
 
     pipeline.volcengine_tts.synthesize = _fake_synthesize  # type: ignore[method-assign]
     pipeline._ensure_valid_translated_video = _fake_ensure_valid_translated_video  # type: ignore[method-assign]
+    pipeline.global_translation_reviewer.review = _global_review_pass  # type: ignore[method-assign]
 
     working_dir = tmp_path / task.task_id
     working_dir.mkdir(parents=True, exist_ok=True)
@@ -195,3 +278,29 @@ async def test_step_translate_with_tts_stays_in_self_managed_flow(tmp_path):
     assert task.tts_audio_path.endswith("tts_final_audio.mp3")
     assert task.translated_video_path.endswith("video_with_tts.mp4")
     assert task.translation_task_id.startswith("selfhosted_")
+
+
+@pytest.mark.asyncio
+async def test_step_translate_blocks_when_global_review_fails(tmp_path):
+    store = TaskStore(store_path=str(tmp_path / "tasks.json"))
+    task = store.create(source_url="https://www.youtube.com/watch?v=global_review_fail_case")
+    task.state = TaskState.UPLOADING_SOURCE.value
+    task.enable_tts = False
+    store.update(task)
+
+    pipeline = ProductionPipeline(task_store=store, notifier=NoopNotifier())
+    pipeline.asr_router = RouterSuccess()  # type: ignore[assignment]
+    pipeline.sentence_regrouper.translate_entries = _regroup_passthrough  # type: ignore[method-assign]
+    pipeline.subtitle_repairer.translate_lines = _translate_to_zh  # type: ignore[method-assign]
+    pipeline.subtitle_repairer.repair_if_needed = _repair_pass  # type: ignore[method-assign]
+    pipeline.global_translation_reviewer.review = _global_review_fail  # type: ignore[method-assign]
+    pipeline._safe_translate_text = _translate_text_passthrough  # type: ignore[method-assign]
+
+    working_dir = tmp_path / task.task_id
+    working_dir.mkdir(parents=True, exist_ok=True)
+
+    ok = await pipeline._step_translate(task, working_dir)
+
+    assert ok is False
+    assert task.state == TaskState.FAILED.value
+    assert task.last_error_code == "GLOBAL_REVIEW_FAILED"

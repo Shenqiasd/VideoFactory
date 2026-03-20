@@ -77,6 +77,27 @@ ffmpeg:
   path: ""
   ffprobe_path: ""
 
+# 质量控制配置
+quality:
+  translation_min_zh_line_ratio: 0.85
+  translation_max_unchanged_ratio: 0.15
+  translation_max_english_residue_ratio: 0.01
+  sentence_regroup_max_cues: 4
+  sentence_regroup_target_words: 30
+  sentence_regroup_max_words: 32
+  sentence_regroup_max_chars: 160
+  sentence_regroup_max_pause_seconds: 1.2
+  global_review:
+    enabled: true
+    provider: "llm"
+    fail_open: true
+    domain_confidence_threshold: 0.6
+    chunk_size: 18
+    max_excerpt_chars: 12000
+    music:
+      enabled: true
+      max_glossary_terms: 24
+
 # 存储配置
 storage:
   r2:

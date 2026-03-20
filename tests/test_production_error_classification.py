@@ -43,6 +43,23 @@ def test_classify_download_failure_missing_ytdlp():
     assert "yt-dlp" in message
 
 
+def test_classify_download_failure_js_runtime_takes_priority_over_rename_noise():
+    code, message = ProductionPipeline.classify_download_failure(
+        "\n".join(
+            [
+                "WARNING: [youtube] No supported JavaScript runtime could be found. Only deno is enabled by default.",
+                "ERROR: Unable to rename file: [Errno 2] No such file or directory: "
+                "'/tmp/video-factory/working/vf_test/source_video.f137.mp4.part' -> "
+                "'/tmp/video-factory/working/vf_test/source_video.f137.mp4'",
+                "Command: /Users/pete/Project/Git/VideoFactory/.venv/bin/yt-dlp --ignore-config",
+            ]
+        ),
+        has_cookies=False,
+    )
+    assert code == "DOWNLOAD_YTDLP_JS_RUNTIME"
+    assert "JS" in message or "runtime" in message
+
+
 def test_classify_download_failure_fallback():
     code, message = ProductionPipeline.classify_download_failure(
         "some unknown yt-dlp stderr",

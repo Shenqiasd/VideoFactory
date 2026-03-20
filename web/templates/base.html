@@ -13,7 +13,7 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-    tailwindcss.config = {
+    tailwind.config = {
         theme: {
             extend: {
                 fontFamily: {
@@ -149,15 +149,19 @@
 
     <!-- Global JS -->
     <script>
-        // Initialize Lucide icons
-        lucide.createIcons();
+        function safeCreateIcons() {
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                window.lucide.createIcons();
+            }
+        }
 
-        // Re-init icons after HTMX swaps
+        safeCreateIcons();
+
         document.body.addEventListener('htmx:afterSwap', function() {
-            lucide.createIcons();
+            safeCreateIcons();
         });
 
-        document.body.addEventListener('htmx:responseError', function(e) {
+        document.body.addEventListener('htmx:responseError', function() {
             showToast('请求失败', 'error');
         });
 

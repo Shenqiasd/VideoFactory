@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
+from core.project_naming import resolve_project_titles
 from core.task import Task, TaskState, TaskStore, normalize_creation_config
 from core.runtime_settings import get_subtitle_style_defaults
 from core.subtitle_style import normalize_subtitle_style
@@ -102,11 +103,18 @@ async def submit_and_run(request: SubmitAndRunRequest, background_tasks: Backgro
     创建任务 + 启动生产管线
     """
     store = get_task_store()
+    resolved_titles = await resolve_project_titles(
+        source_url=request.source_url,
+        source_title=request.source_title,
+        source_lang=request.source_lang,
+        target_lang=request.target_lang,
+    )
 
     # 创建任务
     task = store.create(
         source_url=request.source_url,
-        source_title=request.source_title,
+        source_title=resolved_titles.source_title,
+        translated_title=resolved_titles.project_name,
         source_lang=request.source_lang,
         target_lang=request.target_lang,
         enable_tts=request.enable_tts,
@@ -145,5 +153,6 @@ async def get_production_status(task_id: str):
         "translated_title": task.translated_title,
         "qc_score": task.qc_score,
         "qc_details": task.qc_details,
+        "global_review_report": getattr(task, "global_review_report", {}) or {},
         "error_message": task.error_message,
     }

@@ -52,7 +52,7 @@ class ASRRouter:
             preferred_langs = []
 
         self.providers: Dict[str, BaseASRProvider] = {
-            "youtube": YouTubeSubtitleASR(preferred_langs=preferred_langs),
+            "youtube": YouTubeSubtitleASR(preferred_langs=preferred_langs, config=self.config),
             "volcengine": VolcengineASR(config=self.config),
             "whisper": WhisperLocalASR(config=self.config),
         }

@@ -114,16 +114,7 @@ class VideoDownloader:
             logger.error(f"下载异常: {e}")
             return None
 
-    async def get_video_info(self, url: str) -> Optional[Dict[str, Any]]:
-        """
-        获取视频元信息（不下载）
-
-        Args:
-            url: 视频URL
-
-        Returns:
-            Optional[Dict]: 视频信息
-        """
+    async def _get_video_info(self, url: str, timeout: float) -> Optional[Dict[str, Any]]:
         cmd = build_ytdlp_base_cmd() + [
             "--dump-json",
             "--no-download",
@@ -144,7 +135,7 @@ class VideoDownloader:
             )
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
-                timeout=60
+                timeout=timeout,
             )
 
             if process.returncode == 0:
@@ -168,10 +159,33 @@ class VideoDownloader:
             else:
                 logger.error(f"获取视频信息失败: {stderr.decode(errors='ignore')}")
                 return None
-
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+                await process.communicate()
+            except Exception:
+                pass
+            logger.warning("获取视频信息超时: %s", url)
+            return None
+        except json.JSONDecodeError as exc:
+            logger.error(f"解析视频信息失败: {exc}")
+            return None
         except Exception as e:
             logger.error(f"获取视频信息异常: {e}")
             return None
+
+    async def get_video_info(self, url: str, timeout: float = 60) -> Optional[Dict[str, Any]]:
+        """
+        获取视频元信息（不下载）
+
+        Args:
+            url: 视频URL
+            timeout: 超时时间（秒）
+
+        Returns:
+            Optional[Dict]: 视频信息
+        """
+        return await self._get_video_info(url, timeout=timeout)
 
     async def batch_download(self, urls: List[str], max_concurrent: int = 2) -> List[Optional[str]]:
         """

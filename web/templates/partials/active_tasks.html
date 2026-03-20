@@ -9,7 +9,7 @@
     <a href="/tasks/{{ task.task_id }}" class="block px-4 py-3 rounded-2xl hover:bg-muted transition">
         <div class="flex items-center justify-between mb-2">
             <div class="flex-1 min-w-0">
-                <div class="text-[14px] font-medium text-fg-strong truncate">{{ task.source_title or task.source_url or '未命名' }}</div>
+                <div class="text-[14px] font-medium text-fg-strong truncate">{{ task.project_name or task.source_url or '未命名' }}</div>
                 <div class="flex items-center gap-2 text-[12px] text-fg-sub font-mono mt-0.5">
                     <span>{{ task.task_id[:8] }}</span>
                     {% if task.scope_label %}

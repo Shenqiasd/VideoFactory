@@ -16,6 +16,8 @@ from core.task import Task, TaskState, TaskStore, TaskProduct
 from core.storage import StorageManager, LocalStorage
 from core.notification import NotificationManager, NotifyLevel
 from core.config import Config
+from production.global_translation_reviewer import GlobalTranslationReviewer
+from production.sentence_regrouper import SentenceRegrouper
 from production.subtitle_repair import SubtitleRepairer
 from source.ytdlp_runtime import build_ytdlp_base_cmd, has_yt_dlp_ejs
 from tts import VolcengineTTS
@@ -49,6 +51,9 @@ class QualityChecker:
         self.max_unchanged_ratio = float(
             cfg.get("quality", "translation_max_unchanged_ratio", default=0.15)
         )
+        self.max_english_residue_ratio = float(
+            cfg.get("quality", "translation_max_english_residue_ratio", default=0.01)
+        )
 
     @staticmethod
     def _normalize_text(text: str) -> str:
@@ -60,6 +65,17 @@ class QualityChecker:
     @staticmethod
     def _count_zh_chars(text: str) -> int:
         return sum(1 for c in (text or "") if "\u4e00" <= c <= "\u9fff")
+
+    @staticmethod
+    def _count_ascii_letters(text: str) -> int:
+        return sum(1 for c in (text or "") if c.isascii() and c.isalpha())
+
+    @classmethod
+    def _is_english_residue(cls, text: str) -> bool:
+        content = str(text or "").strip()
+        if not content:
+            return False
+        return cls._count_zh_chars(content) == 0 and cls._count_ascii_letters(content) >= 8
 
     @staticmethod
     def _parse_srt_first_lines(path: Path) -> list[str]:
@@ -78,6 +94,40 @@ class QualityChecker:
             text_lines = [line.strip() for line in m.group(4).strip().split("\n") if line.strip()]
             lines.append(text_lines[0] if text_lines else "")
         return lines
+
+    @staticmethod
+    def _parse_srt_time_seconds(ts: str) -> float:
+        hh, mm, rest = str(ts or "").strip().split(":")
+        ss, ms = rest.split(",")
+        return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
+
+    @classmethod
+    def _count_adjacent_time_overlaps(cls, path: Path) -> tuple[int, int]:
+        if not path.exists():
+            return 0, 0
+
+        content = path.read_text(encoding="utf-8", errors="ignore").replace("\r\n", "\n")
+        pattern = re.compile(
+            r"(\d+)\s*\n([0-9:,]+)\s*-->\s*([0-9:,]+)\s*\n(.*?)(?=\n\s*\n\d+\s*\n|\Z)",
+            re.S,
+        )
+        timings: list[tuple[float, float]] = []
+        for m in pattern.finditer(content):
+            try:
+                timings.append(
+                    (
+                        cls._parse_srt_time_seconds(m.group(2)),
+                        cls._parse_srt_time_seconds(m.group(3)),
+                    )
+                )
+            except Exception:
+                continue
+
+        if len(timings) < 2:
+            return 0, 0
+
+        overlaps = sum(1 for i in range(len(timings) - 1) if timings[i][1] > timings[i + 1][0])
+        return overlaps, len(timings) - 1
 
     async def check(self, task: Task, working_dir: Path) -> Dict[str, Any]:
         """
@@ -166,6 +216,7 @@ class QualityChecker:
                 target_path = working_dir / "target_language_srt.srt"
                 origin_lines = self._parse_srt_first_lines(origin_path)
                 target_lines = self._parse_srt_first_lines(target_path)
+                overlap_count, overlap_pairs = self._count_adjacent_time_overlaps(target_path)
 
                 total = min(len(origin_lines), len(target_lines))
                 if total > 0:
@@ -180,6 +231,25 @@ class QualityChecker:
 
                     zh_ratio = zh_lines / total
                     unchanged_ratio = unchanged_lines / total
+                    english_residue_lines = sum(
+                        1 for line in target_lines[:total] if self._is_english_residue(line)
+                    )
+                    english_residue_ratio = english_residue_lines / total
+                    meta_artifact_lines = sum(
+                        1
+                        for line in target_lines[:total]
+                        if SubtitleRepairer.contains_translation_meta(line)
+                    )
+                    meta_artifact_ratio = meta_artifact_lines / total
+
+                    if overlap_count:
+                        issues.append(f"字幕时间轴存在重叠 {overlap_count} 处")
+                        score -= 20
+                        if overlap_pairs and overlap_count / overlap_pairs > 0.05:
+                            issues.append(
+                                f"字幕重叠占比过高 ({overlap_count / overlap_pairs:.1%} > 5%)"
+                            )
+                            score -= 30
 
                     if zh_ratio < self.min_zh_line_ratio:
                         issues.append(
@@ -189,6 +259,22 @@ class QualityChecker:
                     if unchanged_ratio > self.max_unchanged_ratio:
                         issues.append(
                             f"未翻译行占比过高 ({unchanged_ratio:.1%} > {self.max_unchanged_ratio:.0%})"
+                        )
+                        score -= 35
+                    if english_residue_lines:
+                        issues.append(f"存在英文残留 {english_residue_lines} 行")
+                        score -= 5
+                    if english_residue_ratio > self.max_english_residue_ratio:
+                        issues.append(
+                            f"英文残留行占比过高 ({english_residue_ratio:.1%} > {self.max_english_residue_ratio:.0%})"
+                        )
+                        score -= 35
+                    if meta_artifact_lines:
+                        issues.append(f"存在模型注解/说明文字 {meta_artifact_lines} 行")
+                        score -= 15
+                    if meta_artifact_ratio > 0.01:
+                        issues.append(
+                            f"模型注解行占比过高 ({meta_artifact_ratio:.1%} > 1%)"
                         )
                         score -= 35
 
@@ -231,7 +317,9 @@ class ProductionPipeline:
         )
         self.notifier = notifier or NotificationManager()
         self.qc = QualityChecker()
+        self.sentence_regrouper = SentenceRegrouper()
         self.subtitle_repairer = SubtitleRepairer()
+        self.global_translation_reviewer = GlobalTranslationReviewer(config=config)
         self.asr_router = ASRRouter(config=config)
         self.volcengine_tts = VolcengineTTS(config=config)
         self.translator = get_translator(config=config)
@@ -249,12 +337,31 @@ class ProductionPipeline:
     def classify_download_failure(error_msg: str, has_cookies: bool) -> tuple[str, str]:
         """下载失败分型，返回 (error_code, display_message)。"""
         normalized = (error_msg or "").lower()
-        if "yt-dlp is not installed" in normalized or ("no such file or directory" in normalized and "yt-dlp" in normalized):
-            return "DOWNLOAD_YTDLP_MISSING", "yt-dlp 未安装到当前运行环境，请执行 `./.venv/bin/python -m pip install -r requirements.txt` 后重试"
-        if "js challenge provider" in normalized or "[jsc]" in normalized:
+        stripped = normalized.strip()
+        if (
+            "js challenge provider" in normalized
+            or "[jsc]" in normalized
+            or "yt-dlp-ejs" in normalized
+            or "javascript runtime" in normalized
+            or "no supported javascript runtime" in normalized
+            or "only deno is enabled by default" in normalized
+        ):
             return "DOWNLOAD_YTDLP_JS_RUNTIME", "yt-dlp 的 YouTube JS 解算环境异常，请安装/修复 yt-dlp-ejs，并检查 node/deno 配置"
-        if "yt-dlp-ejs" in normalized or "javascript runtime" in normalized:
-            return "DOWNLOAD_YTDLP_JS_RUNTIME", "yt-dlp 缺少可用的 YouTube JS 运行环境，请安装 yt-dlp-ejs 或调整 JS runtime"
+        if (
+            "yt-dlp is not installed" in normalized
+            or "no module named yt_dlp" in normalized
+            or "no module named 'yt_dlp'" in normalized
+            or (
+                stripped.startswith("[errno 2] no such file or directory:")
+                and (
+                    "'yt-dlp'" in normalized
+                    or "\"yt-dlp\"" in normalized
+                    or "/yt-dlp'" in normalized
+                    or "/yt-dlp\"" in normalized
+                )
+            )
+        ):
+            return "DOWNLOAD_YTDLP_MISSING", "yt-dlp 未安装到当前运行环境，请执行 `./.venv/bin/python -m pip install -r requirements.txt` 后重试"
         if "cookies are no longer valid" in normalized or "cookies have been rotated" in normalized:
             return "DOWNLOAD_COOKIES_INVALID", "YouTube Cookies 已过期，请到设置页面重新导入新的 Cookies"
         if "sign in to confirm you" in normalized and "not a bot" in normalized:
@@ -637,7 +744,8 @@ class ProductionPipeline:
         except Exception as exc:
             logger.warning("文本翻译失败，回退原文: %s", exc)
             return content
-        return (translated or content).strip()
+        cleaned = SubtitleRepairer.sanitize_translation_text((translated or content).strip())
+        return cleaned or content
 
     async def _populate_translated_metadata(
         self,
@@ -647,18 +755,12 @@ class ProductionPipeline:
         target_text: str,
     ):
         source_title = (task.source_title or "").strip()
-        title_seed = source_title or next(
-            (line.strip() for line in target_text.splitlines() if line.strip()),
-            "",
-        )
-        if title_seed:
+        if source_title:
             task.translated_title = await self._safe_translate_text(
-                title_seed,
+                source_title,
                 task.source_lang,
                 task.target_lang,
             )
-            if not task.source_title:
-                task.source_title = title_seed
         elif not task.translated_title:
             task.translated_title = ""
 
@@ -708,11 +810,13 @@ class ProductionPipeline:
             return False, "ASR_EMPTY_SUBTITLE", "ASR 未返回有效字幕"
 
         origin_lines = [self._entry_main_line(entry) for entry in origin_entries]
-        target_lines = await self.subtitle_repairer.translate_lines(
-            origin_lines,
-            task.target_lang,
-            task.source_lang,
+        translation_result = await self.sentence_regrouper.translate_entries(
+            origin_entries,
+            target_lang=task.target_lang,
+            source_lang=task.source_lang,
+            translate_lines=self.subtitle_repairer.translate_lines,
         )
+        target_lines = translation_result.cue_lines
         if len(target_lines) != len(origin_entries):
             logger.warning(
                 "ASR 路由翻译数量不一致: origin=%s target=%s",
@@ -770,11 +874,45 @@ class ProductionPipeline:
         repaired_target_entries = self._parse_srt_entries(target_path.read_text(encoding="utf-8", errors="ignore"))
         origin_lines = [self._entry_main_line(entry) for entry in repaired_origin_entries or origin_entries]
         target_lines = [self._entry_main_line(entry) for entry in repaired_target_entries or target_entries]
-        origin_text = self._render_plain_text(origin_lines)
-        target_text = self._render_plain_text(target_lines)
+        origin_text = self.sentence_regrouper.render_grouped_text(
+            origin_lines,
+            translation_result.groups,
+        ) or self._render_plain_text(origin_lines)
+        target_text = self.sentence_regrouper.render_grouped_text(
+            target_lines,
+            translation_result.groups,
+        ) or self._render_plain_text(target_lines)
         origin_text_path.write_text(origin_text + ("\n" if origin_text else ""), encoding="utf-8")
         target_text_path.write_text(target_text + ("\n" if target_text else ""), encoding="utf-8")
         await self._populate_translated_metadata(task, origin_text=origin_text, target_text=target_text)
+
+        self._mark_step(task, "global_reviewing")
+        task._append_timeline("global_review_started", record_time=False)
+        self.task_store.update(task)
+        global_review_result = await self.global_translation_reviewer.review(
+            task,
+            working_dir,
+            groups=translation_result.groups,
+            origin_text=origin_text,
+            target_text=target_text,
+        )
+        task.global_review_report = global_review_result.report
+        task.translated_title = global_review_result.translated_title
+        task.translated_description = global_review_result.translated_description
+        target_text = global_review_result.target_text or target_text
+        task._append_timeline(
+            "global_review_finished",
+            record_time=False,
+            passed=global_review_result.passed,
+            skipped=global_review_result.skipped,
+            fixed=global_review_result.fixed,
+            domain=global_review_result.domain,
+            confidence=round(global_review_result.confidence, 3),
+            blocking_reason=global_review_result.blocking_reason or None,
+        )
+        self.task_store.update(task)
+        if not global_review_result.passed:
+            return False, "GLOBAL_REVIEW_FAILED", global_review_result.message
 
         if task.enable_tts:
             source_audio_path = task.source_local_path if (task.source_local_path and os.path.exists(task.source_local_path)) else None
@@ -1114,5 +1252,6 @@ class ProductionPipeline:
 
     async def close(self):
         """关闭资源"""
+        await self.global_translation_reviewer.close()
         await self.subtitle_repairer.close()
         await self.notifier.close()

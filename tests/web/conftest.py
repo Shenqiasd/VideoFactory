@@ -18,6 +18,7 @@ def _isolate_home(tmp_path, monkeypatch):
     """隔离任务存储到临时HOME，避免污染本机数据。"""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("VF_DB_PATH", str(tmp_path / "video_factory.db"))
+    monkeypatch.setenv("VF_DISABLE_TITLE_RESOLVE", "1")
 
     from api.routes import distribute as distribute_routes
     from api.routes import publish as publish_routes
