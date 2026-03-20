@@ -7,9 +7,11 @@ import platform
 import uuid
 from pathlib import Path
 from typing import Optional, Any
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
+
+from api.rate_limit import limiter
 import yaml
 
 from core.config import Config
@@ -729,11 +731,12 @@ async def get_tts_voices():
 
 
 @router.post("/test/translation")
-async def test_translation(request: TranslationTestRequest):
+@limiter.limit("5/minute")
+async def test_translation(request: Request, body: TranslationTestRequest):
     """
     快速测试翻译连通性（无需创建任务）。
     """
-    provider = request.provider.strip().lower()
+    provider = body.provider.strip().lower()
     cfg = Config()
     try:
         if provider == "local_llm":
@@ -742,16 +745,16 @@ async def test_translation(request: TranslationTestRequest):
                 runtime_cfg = {}
             runtime_cfg = dict(runtime_cfg)
 
-            if request.base_url is not None:
-                runtime_cfg["base_url"] = request.base_url.strip()
-            if request.api_key is not None:
-                runtime_cfg["api_key"] = request.api_key.strip()
-            if request.model is not None:
-                runtime_cfg["model"] = request.model.strip()
-            if request.timeout is not None:
-                runtime_cfg["timeout"] = int(request.timeout)
-            if request.enabled is not None:
-                runtime_cfg["enabled"] = bool(request.enabled)
+            if body.base_url is not None:
+                runtime_cfg["base_url"] = body.base_url.strip()
+            if body.api_key is not None:
+                runtime_cfg["api_key"] = body.api_key.strip()
+            if body.model is not None:
+                runtime_cfg["model"] = body.model.strip()
+            if body.timeout is not None:
+                runtime_cfg["timeout"] = int(body.timeout)
+            if body.enabled is not None:
+                runtime_cfg["enabled"] = bool(body.enabled)
             elif str(runtime_cfg.get("base_url", "")).strip() and str(runtime_cfg.get("model", "")).strip():
                 runtime_cfg["enabled"] = True
 
@@ -766,16 +769,16 @@ async def test_translation(request: TranslationTestRequest):
                 runtime_cfg = {}
             runtime_cfg = dict(runtime_cfg)
 
-            if request.base_url is not None:
-                runtime_cfg["base_url"] = request.base_url.strip()
-            if request.api_key is not None:
-                runtime_cfg["api_key"] = request.api_key.strip()
-            if request.model is not None:
-                runtime_cfg["model"] = request.model.strip()
-            if request.timeout is not None:
-                runtime_cfg["timeout"] = int(request.timeout)
-            if request.enabled is not None:
-                runtime_cfg["enabled"] = bool(request.enabled)
+            if body.base_url is not None:
+                runtime_cfg["base_url"] = body.base_url.strip()
+            if body.api_key is not None:
+                runtime_cfg["api_key"] = body.api_key.strip()
+            if body.model is not None:
+                runtime_cfg["model"] = body.model.strip()
+            if body.timeout is not None:
+                runtime_cfg["timeout"] = int(body.timeout)
+            if body.enabled is not None:
+                runtime_cfg["enabled"] = bool(body.enabled)
             elif str(runtime_cfg.get("api_key", "")).strip():
                 # 显式传入 API Key 时，默认启用测试
                 runtime_cfg["enabled"] = True
@@ -791,16 +794,16 @@ async def test_translation(request: TranslationTestRequest):
             raise HTTPException(status_code=400, detail=f"不支持的翻译 provider: {provider}")
 
         result = await translator.translate_text(
-            text=request.text,
-            source_lang=request.source_lang,
-            target_lang=request.target_lang,
+            text=body.text,
+            source_lang=body.source_lang,
+            target_lang=body.target_lang,
         )
         runtime = translator.runtime_config()
         return {
             "success": True,
             "provider": provider,
-            "source_lang": request.source_lang,
-            "target_lang": request.target_lang,
+            "source_lang": body.source_lang,
+            "target_lang": body.target_lang,
             "base_url": runtime.base_url,
             "model": runtime.model,
             "result": result,
@@ -813,11 +816,12 @@ async def test_translation(request: TranslationTestRequest):
 
 
 @router.post("/test/tts")
-async def test_tts(request: TTSTestRequest):
+@limiter.limit("5/minute")
+async def test_tts(request: Request, body: TTSTestRequest):
     """
     快速测试 TTS 连通性（返回可播放音频 URL）。
     """
-    provider = request.provider.strip().lower()
+    provider = body.provider.strip().lower()
     if provider != "volcengine":
         raise HTTPException(status_code=400, detail="当前仅支持 volcengine 测试")
 
@@ -827,40 +831,40 @@ async def test_tts(request: TTSTestRequest):
         runtime_cfg = {}
     runtime_cfg = dict(runtime_cfg)
 
-    if request.appid is not None:
-        appid = request.appid.strip()
+    if body.appid is not None:
+        appid = body.appid.strip()
         if appid:
             runtime_cfg["appid"] = appid
             runtime_cfg["app_id"] = appid
-    if request.access_token is not None:
-        token = request.access_token.strip()
+    if body.access_token is not None:
+        token = body.access_token.strip()
         if token:
             runtime_cfg["access_token"] = token
             runtime_cfg["token"] = token
-    if request.resource_id is not None:
-        runtime_cfg["resource_id"] = request.resource_id.strip() or "seed-tts-1.0"
-    if request.cluster is not None:
-        runtime_cfg["cluster"] = request.cluster.strip()
-    if request.api_url is not None:
-        api_url = request.api_url.strip()
+    if body.resource_id is not None:
+        runtime_cfg["resource_id"] = body.resource_id.strip() or "seed-tts-1.0"
+    if body.cluster is not None:
+        runtime_cfg["cluster"] = body.cluster.strip()
+    if body.api_url is not None:
+        api_url = body.api_url.strip()
         if api_url:
             runtime_cfg["api_url"] = api_url
             runtime_cfg["synthesis_url"] = api_url
-    if request.timeout is not None:
-        runtime_cfg["timeout"] = int(request.timeout)
-    if request.encoding is not None:
-        runtime_cfg["encoding"] = request.encoding.strip()
-    if request.sample_rate is not None:
-        runtime_cfg["sample_rate"] = int(request.sample_rate)
-    if request.speed_ratio is not None:
-        runtime_cfg["speed_ratio"] = float(request.speed_ratio)
-    if request.volume_ratio is not None:
-        runtime_cfg["volume_ratio"] = float(request.volume_ratio)
-    if request.pitch_ratio is not None:
-        runtime_cfg["pitch_ratio"] = float(request.pitch_ratio)
+    if body.timeout is not None:
+        runtime_cfg["timeout"] = int(body.timeout)
+    if body.encoding is not None:
+        runtime_cfg["encoding"] = body.encoding.strip()
+    if body.sample_rate is not None:
+        runtime_cfg["sample_rate"] = int(body.sample_rate)
+    if body.speed_ratio is not None:
+        runtime_cfg["speed_ratio"] = float(body.speed_ratio)
+    if body.volume_ratio is not None:
+        runtime_cfg["volume_ratio"] = float(body.volume_ratio)
+    if body.pitch_ratio is not None:
+        runtime_cfg["pitch_ratio"] = float(body.pitch_ratio)
 
-    if request.enabled is not None:
-        runtime_cfg["enabled"] = bool(request.enabled)
+    if body.enabled is not None:
+        runtime_cfg["enabled"] = bool(body.enabled)
     elif str(runtime_cfg.get("appid") or runtime_cfg.get("app_id") or "").strip() and str(
         runtime_cfg.get("access_token") or runtime_cfg.get("token") or ""
     ).strip():
@@ -886,9 +890,9 @@ async def test_tts(request: TTSTestRequest):
 
     try:
         result = await tts.synthesize(
-            text=request.text,
+            text=body.text,
             output_path=str(out_path),
-            voice_type=request.voice_type,
+            voice_type=body.voice_type,
         )
     except Exception as exc:
         logger.warning("TTS 测试异常: %s", exc)
@@ -901,7 +905,7 @@ async def test_tts(request: TTSTestRequest):
     return {
         "success": True,
         "provider": provider,
-        "voice_type": request.voice_type,
+        "voice_type": body.voice_type,
         "audio_url": f"/api/system/test/tts/audio/{Path(result.audio_path).name}",
         "size_bytes": Path(result.audio_path).stat().st_size,
     }

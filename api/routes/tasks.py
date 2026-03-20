@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from pathlib import Path
 import hashlib
 
+from api.rate_limit import limiter
 from core.project_naming import is_remote_url, resolve_project_titles
 from core.task import Task, TaskState, TaskStore, VALID_SCOPES, SCOPE_DEFAULTS, normalize_creation_config
 from core.config import Config
@@ -653,43 +654,44 @@ def _collect_task_artifacts(task: Task) -> List[dict]:
 # ========== 路由 ==========
 
 @router.post("/", response_model=dict)
-async def create_task(request: TaskCreateRequest):
+@limiter.limit("10/minute")
+async def create_task(request: Request, body: TaskCreateRequest):
     """创建新任务"""
     store = get_task_store()
     resolved_source_title, resolved_project_name = await _resolve_titles_for_task(
-        source_url=request.source_url,
-        source_title=request.source_title,
-        source_lang=request.source_lang,
-        target_lang=request.target_lang,
+        source_url=body.source_url,
+        source_title=body.source_title,
+        source_lang=body.source_lang,
+        target_lang=body.target_lang,
     )
 
     # 验证 scope，无效则回退 full
-    scope = request.task_scope if request.task_scope in VALID_SCOPES else "full"
+    scope = body.task_scope if body.task_scope in VALID_SCOPES else "full"
     options = _build_scope_options(
         scope,
-        enable_tts=request.enable_tts,
-        enable_short_clips=request.enable_short_clips,
-        enable_article=request.enable_article,
-        embed_subtitle_type=request.embed_subtitle_type,
+        enable_tts=body.enable_tts,
+        enable_short_clips=body.enable_short_clips,
+        enable_article=body.enable_article,
+        embed_subtitle_type=body.embed_subtitle_type,
     )
 
     task = store.create(
-        source_url=request.source_url,
+        source_url=body.source_url,
         source_title=resolved_source_title,
         translated_title=resolved_project_name,
-        source_lang=request.source_lang,
-        target_lang=request.target_lang,
+        source_lang=body.source_lang,
+        target_lang=body.target_lang,
         task_scope=scope,
         enable_tts=options["enable_tts"],
         enable_short_clips=options["enable_short_clips"],
         enable_article=options["enable_article"],
         embed_subtitle_type=options["embed_subtitle_type"],
-        subtitle_style=_resolve_subtitle_style(request.subtitle_style),
+        subtitle_style=_resolve_subtitle_style(body.subtitle_style),
         creation_config=normalize_creation_config(
-            request.creation_config,
+            body.creation_config,
             enable_short_clips=options["enable_short_clips"],
         ),
-        priority=request.priority,
+        priority=body.priority,
     )
 
     logger.info(f"📝 API创建任务: {task.task_id} (scope={scope})")
@@ -702,6 +704,7 @@ async def create_task(request: TaskCreateRequest):
 
 
 @router.post("/create", response_model=dict)
+@limiter.limit("10/minute")
 async def create_task_compat(
     request: Request,
     youtube_url: str = Form(...),
@@ -809,6 +812,7 @@ async def create_task_compat(
 
 
 @router.post("/batch-create", response_model=dict)
+@limiter.limit("3/minute")
 async def batch_create_tasks(
     request: Request,
     urls: str = Form(...),
