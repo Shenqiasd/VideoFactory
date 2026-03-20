@@ -4,8 +4,10 @@
 import logging
 import time
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
+
+from api.rate_limit import limiter
 
 from core.task import TaskState, TaskStore
 from distribute.scheduler import PublishScheduler
@@ -111,15 +113,16 @@ async def _run_due_jobs(scheduler: PublishScheduler):
 
 
 @router.post("/publish")
-async def publish(request: PublishRequest, background_tasks: BackgroundTasks):
+@limiter.limit("10/minute")
+async def publish(request: Request, body: PublishRequest, background_tasks: BackgroundTasks):
     """
     发布任务到多平台
     """
     store = get_task_store()
-    task = store.get(request.task_id)
+    task = store.get(body.task_id)
 
     if not task:
-        raise HTTPException(status_code=404, detail={"code": "TASK_NOT_FOUND", "message": f"任务不存在: {request.task_id}"})
+        raise HTTPException(status_code=404, detail={"code": "TASK_NOT_FOUND", "message": f"任务不存在: {body.task_id}"})
 
     if task.state != TaskState.READY_TO_PUBLISH.value:
         raise HTTPException(
@@ -127,7 +130,7 @@ async def publish(request: PublishRequest, background_tasks: BackgroundTasks):
             detail={"code": "TASK_NOT_READY", "message": f"任务未就绪，当前状态: {task.state}"},
         )
 
-    if _publish_targets_pending_creation_review(task, request.platforms):
+    if _publish_targets_pending_creation_review(task, body.platforms):
         raise HTTPException(
             status_code=400,
             detail={"code": "CREATION_REVIEW_PENDING", "message": "创作产物待审核，暂不能发布"},
@@ -136,22 +139,22 @@ async def publish(request: PublishRequest, background_tasks: BackgroundTasks):
     if not task.products:
         raise HTTPException(status_code=400, detail={"code": "NO_PRODUCTS", "message": "任务没有产出物"})
 
-    publish_accounts = _validate_publish_accounts(request.publish_accounts, request.platforms)
+    publish_accounts = _validate_publish_accounts(body.publish_accounts, body.platforms)
     if publish_accounts:
         task.publish_accounts.update(publish_accounts)
 
     scheduler = get_scheduler()
-    if request.mode == "immediate":
-        stats = scheduler.schedule_immediate(task, request.platforms, force=request.force_republish)
-    elif request.mode == "staggered":
+    if body.mode == "immediate":
+        stats = scheduler.schedule_immediate(task, body.platforms, force=body.force_republish)
+    elif body.mode == "staggered":
         stats = scheduler.schedule_staggered(
             task,
-            request.platforms,
-            interval_minutes=request.interval_minutes,
-            force=request.force_republish,
+            body.platforms,
+            interval_minutes=body.interval_minutes,
+            force=body.force_republish,
         )
     else:
-        stats = scheduler.schedule_immediate(task, request.platforms, force=request.force_republish)
+        stats = scheduler.schedule_immediate(task, body.platforms, force=body.force_republish)
 
     task.transition(TaskState.PUBLISHING)
     store.update(task)
@@ -163,14 +166,14 @@ async def publish(request: PublishRequest, background_tasks: BackgroundTasks):
     )
 
     return {
-        "message": f"发布已调度 ({request.mode})",
+        "message": f"发布已调度 ({body.mode})",
         "task_id": task.task_id,
-        "platforms": request.platforms,
+        "platforms": body.platforms,
         "publish_accounts": publish_accounts,
         "products_count": len(task.products),
         "added_jobs": stats["added"],
         "skipped_jobs": stats["skipped"],
-        "force_republish": request.force_republish,
+        "force_republish": body.force_republish,
     }
 
 

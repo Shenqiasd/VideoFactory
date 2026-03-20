@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
 from pathlib import Path
 
 from core.task import TaskStore
@@ -25,6 +26,7 @@ from api.routes.system import router as system_router
 from api.routes.pages import router as pages_router
 from api.routes.publish import router as publish_router
 from api.routes.storage import router as storage_router
+from api.rate_limit import limiter, rate_limit_exceeded_handler
 from core.scheduler import StorageCleanupScheduler
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# 速率限制
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # CORS（允许OpenClaw等客户端调用）
 app.add_middleware(
