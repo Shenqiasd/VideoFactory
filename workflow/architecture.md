@@ -43,12 +43,13 @@
 - 封面生成现支持 horizontal + vertical 两类输出，优先使用 YouTube 原始缩略图，失败时回退关键帧抽取
 
 ## 3) 服务拓扑（本机）
-- API：`9000`
+- API：默认 `9000`（本地），Railway 等 PaaS 通过 `PORT` 环境变量动态分配
 - Groq Whisper 代理：`8866`
 - Edge-TTS 代理：`8877`
 - Worker：后台循环（心跳写入 `~/.video-factory/worker_heartbeat.json`）
 - 下载运行时：`yt-dlp` 作为 Python 依赖安装到项目 `.venv`，下载命令优先解析当前运行时目录下的 `yt-dlp`
 - 源视频上传：R2 / `rclone` 仅用于增强型回传；本地自管链路在上传失败时继续使用 `source_local_path`
+- Railway 部署：`railway.toml` 配置启动命令、健康检查路径 `/api/health`（30s 超时）、失败重启策略；API 端口优先级 `VF_API_PORT` → `PORT` → `9000`，绑定地址优先级 `VF_API_HOST` → `HOST` → `0.0.0.0`
 - YouTube ASR：优先 `youtube-transcript-api`，为空时回退 `yt-dlp` 自动字幕，再继续 Volcengine / Whisper 降级
 - 自动字幕规范化：`yt-dlp` 回退优先读取 `srv3` 并清洗滚动重复 cue，避免上游字幕换行滚动导致逐行翻译重复
 - 字幕主翻译：在 `ProductionPipeline` 中先用 `SentenceRegrouper` 将连续碎片 cue 合并成 sentence group，再翻译并投影回原 cue 数量，降低逐行碎片翻译的语义断裂
