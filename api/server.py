@@ -15,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from core.task import TaskStore
 from core.runtime import read_worker_heartbeat
 from api.routes.tasks import router as tasks_router
 from api.routes.production import router as production_router
@@ -103,22 +102,16 @@ async def api_root():
 @app.get("/api/health")
 async def health():
     """健康检查"""
-    store = TaskStore()
-    stats = store.get_stats()
     heartbeat = read_worker_heartbeat(max_age_seconds=90)
 
     return {
         "status": "healthy",
         "service": "video-factory",
-        "worker_alive": heartbeat["alive"],
-        "last_worker_heartbeat": heartbeat["timestamp"],
-        "worker_pid": heartbeat["pid"],
-        "worker_reason": heartbeat["reason"],
-        "queue": {
-            "queued": stats.get("queued", 0),
-            "active": len(store.list_active()),
-            "failed": stats.get("failed", 0),
-            "total": stats.get("total", 0),
+        "worker": {
+            "alive": heartbeat["alive"],
+            "last_heartbeat": heartbeat["timestamp"],
+            "pid": heartbeat["pid"],
+            "reason": heartbeat["reason"],
         },
     }
 
