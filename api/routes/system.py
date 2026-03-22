@@ -545,12 +545,14 @@ def _ensure_config_file(path: Path) -> None:
 
 def _read_yaml_config() -> dict[str, Any]:
     path = _config_file_path()
-    _ensure_config_file(path)
     try:
+        _ensure_config_file(path)
         content = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(content, dict):
             raise ValueError("配置文件格式异常")
         return content
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取配置失败: {str(e)}") from e
 
