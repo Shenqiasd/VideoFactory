@@ -20,12 +20,17 @@ _SECRET_KEYS = frozenset({"api_key", "token", "access_token", "secret", "passwor
 
 
 def _restore_secrets(new: dict, old: dict) -> dict:
-    """Recursively restore secret values that the frontend left blank."""
+    """Recursively restore secret values that the frontend left blank or masked."""
     merged: dict = {}
     for key, value in new.items():
         if isinstance(value, dict):
             merged[key] = _restore_secrets(value, old.get(key, {}) if isinstance(old.get(key), dict) else {})
-        elif key in _SECRET_KEYS and isinstance(value, str) and value == "":
+        elif key in _SECRET_KEYS and isinstance(value, str) and (
+            value == "" or value.startswith("****")
+        ):
+            # Empty string = frontend didn't touch the masked field.
+            # Starts with '****' = user accidentally submitted the masked placeholder.
+            # Either way, keep the existing real value.
             merged[key] = old.get(key, "") if isinstance(old.get(key), str) else ""
         else:
             merged[key] = value

@@ -368,7 +368,7 @@ async def delete_account(account_id: str):
     return {"message": "账号已删除"}
 
 
-@router.post("/accounts/{account_id}/test")
+@router.post("/accounts/{account_id}/test", dependencies=[Depends(require_auth)])
 async def test_account(account_id: str):
     """测试账号配置是否可用"""
     db = get_db()
@@ -398,7 +398,7 @@ async def test_account(account_id: str):
     }
 
 
-@router.post("/accounts/{account_id}/default")
+@router.post("/accounts/{account_id}/default", dependencies=[Depends(require_auth)])
 async def set_default_account(account_id: str):
     db = get_db()
     if not db.set_default_account(account_id):
