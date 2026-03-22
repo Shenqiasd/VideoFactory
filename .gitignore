@@ -63,6 +63,8 @@ downloads/
 # Secrets & Config (敏感信息)
 config/settings.yaml
 config/settings.local.yaml
+config/users.json
+config/.session_secret
 .env
 .env.local
 *.key

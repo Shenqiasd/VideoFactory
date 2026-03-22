@@ -9,8 +9,9 @@
 - `src/creation/`：高光提取、主体检测、智能裁剪、字幕/转场/BGM 组合成片
 - `src/distribute/`：发布器与调度器（含失败重试与重放）
 - `workers/`：编排器主循环 + 调度器并行运行
-- `api/routes/`：任务、生产、加工、分发、系统、Web 页面/partials
-- `web/templates/`：Jinja2 页面 + HTMX partials
+- `api/auth.py`：认证模块 — 用户注册/登录、bcrypt 密码哈希、itsdangerous 签名 httpOnly Cookie 会话、Token 脱敏工具
+- `api/routes/`：任务、生产、加工、分发、系统、发布账号、存储、频道监控、Web 页面/partials
+- `web/templates/`：Jinja2 页面 + HTMX partials + 独立登录/注册页
 
 ## 2) 核心任务流
 任务状态机定义在 `src/core/task.py`：
@@ -87,7 +88,23 @@
   - 任务详情页显示账号绑定、发布事件流，以及创作结果/创作审核操作
   - 新建任务页会前置校验平台账号是否可用，并支持创作配置提交
 
-## 5) 测试基线
+## 5) 认证系统
+- 用户存储：`config/users.json`（bcrypt 哈希密码，JSON 文件）
+- 会话管理：`itsdangerous.URLSafeTimedSerializer` 签名的 httpOnly Cookie（`vf_session`，30 天有效期）
+- 密钥持久化：`config/.session_secret`（自动生成，或通过 `VF_SECRET_KEY` 环境变量指定）
+- Bootstrap 模式：无用户时认证完全跳过（向后兼容本地开发），首次访问 `/login` 自动跳转 `/register`
+- 注册控制：首个用户可直接注册，后续注册需 `VF_ALLOW_REGISTRATION=true`
+- 受保护端点：
+  - `system.py`：9 个敏感端点（配置读写、测试、Cookie）
+  - `storage.py`：3 个写端点（删除、清理、配置更新）
+  - `publish.py`：6 个写端点（创建、上传、删除、测试、设置默认）
+  - `/settings` 页面（302 重定向到 `/login`）
+- Token 脱敏：GET 响应中 api_key/token/access_token 等字段自动掩码（`****xxxx`）；POST 保存时自动还原未修改的密钥
+- 页面路由：`/login`、`/register`（独立 HTML，不继承 base.html）
+- API 路由：`/api/auth/register`、`/api/auth/login`、`/api/auth/logout`、`/api/auth/status`
+- 依赖：`passlib[bcrypt]>=1.7.4`、`bcrypt>=4.0.0,<5.0.0`、`itsdangerous>=2.0`
+
+## 6) 测试基线
 - 当前仓库测试覆盖 API 合约、页面/partials、运行时健康、调度器、生产异常分型、scope 编排等。
 - 基线命令：`./.venv/bin/python -m pytest -q`
 - 发布/创作模块补充回归：
@@ -95,7 +112,7 @@
   - `./.venv/bin/python -m pytest -q tests/web/test_api_contract.py tests/web/test_pages_http.py`
   - `./.venv/bin/python -m pytest -q tests/e2e/test_frontend_playwright.py`
 
-## 6) 已识别的技术债（代码层面）
+## 7) 已识别的技术债（代码层面）
 1. 凭证明文风险：
    - `config/settings.yaml`
    - `scripts/groq_whisper_proxy.py`

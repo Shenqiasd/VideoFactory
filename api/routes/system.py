@@ -7,12 +7,34 @@ import platform
 import uuid
 from pathlib import Path
 from typing import Optional, Any
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 import yaml
 
+from api.auth import mask_dict_secrets, require_auth
 from core.config import Config
+
+# Keys whose empty-string values from the frontend mean "keep existing".
+_SECRET_KEYS = frozenset({"api_key", "token", "access_token", "secret", "password"})
+
+
+def _restore_secrets(new: dict, old: dict) -> dict:
+    """Recursively restore secret values that the frontend left blank or masked."""
+    merged: dict = {}
+    for key, value in new.items():
+        if isinstance(value, dict):
+            merged[key] = _restore_secrets(value, old.get(key, {}) if isinstance(old.get(key), dict) else {})
+        elif key in _SECRET_KEYS and isinstance(value, str) and (
+            value == "" or value.startswith("****")
+        ):
+            # Empty string = frontend didn't touch the masked field.
+            # Starts with '****' = user accidentally submitted the masked placeholder.
+            # Either way, keep the existing real value.
+            merged[key] = old.get(key, "") if isinstance(old.get(key), str) else ""
+        else:
+            merged[key] = value
+    return merged
 from core.storage import StorageManager, LocalStorage
 from core.task import TaskStore
 from core.runtime import read_worker_heartbeat
@@ -637,7 +659,7 @@ async def get_runtime_status():
     }
 
 
-@router.get("/config")
+@router.get("/config", dependencies=[Depends(require_auth)])
 async def get_current_config():
     """获取当前配置（脱敏）"""
     config = Config()
@@ -652,13 +674,13 @@ async def get_current_config():
     }
 
 
-@router.get("/subtitle-style-defaults")
+@router.get("/subtitle-style-defaults", dependencies=[Depends(require_auth)])
 async def get_subtitle_style_defaults_api():
     """获取默认字幕样式（任务级默认值）。"""
     return {"subtitle_style": get_subtitle_style_defaults()}
 
 
-@router.post("/subtitle-style-defaults")
+@router.post("/subtitle-style-defaults", dependencies=[Depends(require_auth)])
 async def set_subtitle_style_defaults_api(request: SubtitleStyleDefaultsRequest):
     """更新默认字幕样式。"""
     normalized = normalize_subtitle_style(
@@ -669,7 +691,7 @@ async def set_subtitle_style_defaults_api(request: SubtitleStyleDefaultsRequest)
     return {"message": "默认字幕样式已更新", "subtitle_style": saved}
 
 
-@router.get("/settings/asr-tts")
+@router.get("/settings/asr-tts", dependencies=[Depends(require_auth)])
 async def get_asr_tts_settings():
     """
     获取翻译/ASR/TTS 配置。
@@ -685,33 +707,44 @@ async def get_asr_tts_settings():
         translation if isinstance(translation, dict) else {},
     )
     return {
-        "translation": merged_translation,
-        "asr": merged_asr,
-        "tts": merged_tts,
+        "translation": mask_dict_secrets(merged_translation),
+        "asr": mask_dict_secrets(merged_asr),
+        "tts": mask_dict_secrets(merged_tts),
     }
 
 
-@router.post("/settings/asr-tts")
+@router.post("/settings/asr-tts", dependencies=[Depends(require_auth)])
 async def set_asr_tts_settings(request: ASRTTSSettingsRequest):
     """
     更新翻译/ASR/TTS 配置到 settings.yaml。
     保存后会重置 API 进程内配置缓存；Worker 进程建议重启以加载新配置。
     """
     config_data = _read_yaml_config()
-    config_data["asr"] = request.asr.model_dump()
-    config_data["tts"] = _normalize_tts_config(request.tts.model_dump())
+
+    # Restore secret values the frontend left blank (masked placeholders).
+    new_asr = request.asr.model_dump()
+    new_tts = _normalize_tts_config(request.tts.model_dump())
+    new_asr = _restore_secrets(new_asr, config_data.get("asr") or {})
+    new_tts = _restore_secrets(new_tts, config_data.get("tts") or {})
+
+    config_data["asr"] = new_asr
+    config_data["tts"] = new_tts
     config_data.pop("klicstudio", None)
     if request.translation is not None:
-        config_data["translation"] = request.translation.model_dump()
+        new_translation = request.translation.model_dump()
+        new_translation = _restore_secrets(
+            new_translation, config_data.get("translation") or {}
+        )
+        config_data["translation"] = new_translation
     _write_yaml_config(config_data)
     Config.reset()
     return {
         "success": True,
         "message": "翻译/ASR/TTS 配置已保存（Worker 需重启后生效）",
         "config_path": str(_config_file_path()),
-        "translation": config_data.get("translation", {}),
-        "asr": config_data["asr"],
-        "tts": config_data["tts"],
+        "translation": mask_dict_secrets(config_data.get("translation") or {}),
+        "asr": mask_dict_secrets(config_data["asr"]),
+        "tts": mask_dict_secrets(config_data["tts"]),
     }
 
 
@@ -728,7 +761,7 @@ async def get_tts_voices():
     }
 
 
-@router.post("/test/translation")
+@router.post("/test/translation", dependencies=[Depends(require_auth)])
 async def test_translation(request: TranslationTestRequest):
     """
     快速测试翻译连通性（无需创建任务）。
@@ -812,7 +845,7 @@ async def test_translation(request: TranslationTestRequest):
         raise HTTPException(status_code=500, detail=f"翻译测试失败: {str(exc)}") from exc
 
 
-@router.post("/test/tts")
+@router.post("/test/tts", dependencies=[Depends(require_auth)])
 async def test_tts(request: TTSTestRequest):
     """
     快速测试 TTS 连通性（返回可播放音频 URL）。
@@ -931,7 +964,7 @@ async def get_test_tts_audio(filename: str):
     return FileResponse(path=str(file_path), media_type=media_type, filename=file_path.name)
 
 
-@router.post("/settings/youtube-cookies")
+@router.post("/settings/youtube-cookies", dependencies=[Depends(require_auth)])
 async def save_youtube_cookies(cookies: str = Form(...)):
     """
     保存 YouTube cookies 到本地文件
@@ -972,7 +1005,7 @@ async def save_youtube_cookies(cookies: str = Form(...)):
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
 
 
-@router.get("/settings/youtube-cookies")
+@router.get("/settings/youtube-cookies", dependencies=[Depends(require_auth)])
 async def get_youtube_cookies():
     """
     读取已保存的 YouTube cookies
@@ -984,9 +1017,10 @@ async def get_youtube_cookies():
 
         if cookies_file.exists():
             cookies_content = cookies_file.read_text(encoding="utf-8")
+            from api.auth import mask_secret as _mask
             return {
                 "exists": True,
-                "cookies": cookies_content,
+                "cookies": _mask(cookies_content, visible_tail=20),
                 "path": str(cookies_file),
                 "size": len(cookies_content),
             }
