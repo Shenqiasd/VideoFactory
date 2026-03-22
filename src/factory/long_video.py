@@ -56,14 +56,29 @@ class LongVideoProcessor:
 
     @staticmethod
     def _default_font_name() -> str:
-        # macOS 下优先使用系统可用且覆盖中英文字形的字体。
+        # 按优先级探测系统中可用的 CJK 字体。
+        # macOS
         if os.path.exists("/System/Library/Fonts/Hiragino Sans GB.ttc"):
             return "Hiragino Sans GB"
+        # Linux – Noto Sans CJK（Docker 镜像通过 fonts-noto-cjk 安装）
+        for noto in (
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+        ):
+            if os.path.exists(noto):
+                return "Noto Sans CJK SC"
+        # Linux – WenQuanYi（Ubuntu 默认中文字体）
+        if os.path.exists("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"):
+            return "WenQuanYi Zen Hei"
         return "Arial Unicode MS"
 
     @staticmethod
     def _default_font_candidates() -> List[str]:
         return [
+            # Linux CJK fonts
+            "Noto Sans CJK SC",
+            "WenQuanYi Zen Hei",
+            # macOS CJK fonts
             "Hiragino Sans GB",
             "PingFang SC",
             "Arial Unicode MS",
@@ -73,6 +88,11 @@ class LongVideoProcessor:
     @staticmethod
     def _default_fonts_dir() -> str:
         for candidate in (
+            # Linux
+            "/usr/share/fonts/opentype/noto",
+            "/usr/share/fonts/truetype/wqy",
+            "/usr/share/fonts",
+            # macOS
             "/System/Library/Fonts/Supplemental",
             "/System/Library/Fonts",
             "/Library/Fonts",
