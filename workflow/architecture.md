@@ -1,6 +1,6 @@
 # video-factory 架构现状（代码基线）
 
-最后更新：2026-03-13
+最后更新：2026-03-22
 
 ## 1) 分层结构
 - `src/core/`：配置、任务模型、任务存储、存储管理、通知、运行时心跳
@@ -50,6 +50,7 @@
 - 下载运行时：`yt-dlp` 作为 Python 依赖安装到项目 `.venv`，下载命令优先解析当前运行时目录下的 `yt-dlp`
 - 源视频上传：R2 / `rclone` 仅用于增强型回传；本地自管链路在上传失败时继续使用 `source_local_path`
 - Railway 部署：`railway.toml` 配置启动命令、健康检查路径 `/api/health`（30s 超时）、失败重启策略；API 端口优先级 `VF_API_PORT` → `PORT` → `9000`，绑定地址优先级 `VF_API_HOST` → `HOST` → `0.0.0.0`
+- Docker CJK 字体：Dockerfile 安装 `fonts-noto-cjk`（Noto Sans CJK SC）和 `fontconfig`，构建时执行 `fc-cache -f` 刷新字体缓存；字幕渲染（ffmpeg/libass）在 Linux 上按优先级探测 Noto Sans CJK SC → WenQuanYi Zen Hei → Arial Unicode MS
 - YouTube ASR：优先 `youtube-transcript-api`，为空时回退 `yt-dlp` 自动字幕，再继续 Volcengine / Whisper 降级
 - 自动字幕规范化：`yt-dlp` 回退优先读取 `srv3` 并清洗滚动重复 cue，避免上游字幕换行滚动导致逐行翻译重复
 - 字幕主翻译：在 `ProductionPipeline` 中先用 `SentenceRegrouper` 将连续碎片 cue 合并成 sentence group，再翻译并投影回原 cue 数量，降低逐行碎片翻译的语义断裂

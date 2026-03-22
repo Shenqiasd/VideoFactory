@@ -1,5 +1,19 @@
 # 执行日志
 
+## 2026-03-22
+- 08:30 [Devin] 修复 Linux/Docker 环境下字幕预览中文字体渲染失败
+  - **根因**：`LongVideoProcessor._default_font_name()` 仅探测 macOS 字体（Hiragino Sans GB），Linux 上直接回退到 Arial Unicode MS（不存在），导致 ffmpeg/libass 渲染中文字符失败
+  - **修复**：
+    - `Dockerfile` 新增 `fonts-noto-cjk` + `fontconfig` 依赖，构建时 `fc-cache -f` 刷新字体缓存
+    - `_default_font_name()` 新增 Linux 字体探测：Noto Sans CJK SC → WenQuanYi Zen Hei → Arial Unicode MS
+    - `_default_font_candidates()` 调整优先级：Linux CJK 字体排在 macOS 字体之前
+    - `_default_fonts_dir()` 新增 Linux 字体目录搜索路径
+  - 验证结果：
+    - `font_requested` 从 "Arial Unicode MS" → "WenQuanYi Zen Hei"
+    - 预览视频中中文字幕 "这是字幕样式预览（中文）" 正确渲染
+    - API 返回 `visibility_score=0.043747`，字体匹配成功
+    - 全量测试：`python -m pytest -q --ignore=tests/e2e/` → 209 passed
+
 ## 2026-03-10
 - 18:05 [Codex] 接入句子级重组翻译
   - 新增 `src/production/sentence_regrouper.py`，在主翻译阶段先将连续碎片 cue 合并为 sentence group，翻译后再按原 cue 数量投影回 `target_lines`
