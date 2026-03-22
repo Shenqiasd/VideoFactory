@@ -724,8 +724,8 @@ async def set_asr_tts_settings(request: ASRTTSSettingsRequest):
     # Restore secret values the frontend left blank (masked placeholders).
     new_asr = request.asr.model_dump()
     new_tts = _normalize_tts_config(request.tts.model_dump())
-    new_asr = _restore_secrets(new_asr, config_data.get("asr", {}))
-    new_tts = _restore_secrets(new_tts, config_data.get("tts", {}))
+    new_asr = _restore_secrets(new_asr, config_data.get("asr") or {})
+    new_tts = _restore_secrets(new_tts, config_data.get("tts") or {})
 
     config_data["asr"] = new_asr
     config_data["tts"] = new_tts
@@ -733,7 +733,7 @@ async def set_asr_tts_settings(request: ASRTTSSettingsRequest):
     if request.translation is not None:
         new_translation = request.translation.model_dump()
         new_translation = _restore_secrets(
-            new_translation, config_data.get("translation", {})
+            new_translation, config_data.get("translation") or {}
         )
         config_data["translation"] = new_translation
     _write_yaml_config(config_data)
@@ -742,9 +742,9 @@ async def set_asr_tts_settings(request: ASRTTSSettingsRequest):
         "success": True,
         "message": "翻译/ASR/TTS 配置已保存（Worker 需重启后生效）",
         "config_path": str(_config_file_path()),
-        "translation": config_data.get("translation", {}),
-        "asr": config_data["asr"],
-        "tts": config_data["tts"],
+        "translation": mask_dict_secrets(config_data.get("translation") or {}),
+        "asr": mask_dict_secrets(config_data["asr"]),
+        "tts": mask_dict_secrets(config_data["tts"]),
     }
 
 

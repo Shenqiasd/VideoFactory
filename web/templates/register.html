@@ -98,7 +98,8 @@
             });
             const data = await resp.json();
             if (resp.ok && data.success) {
-                const next = new URLSearchParams(window.location.search).get('next') || '/';
+                const raw = new URLSearchParams(window.location.search).get('next') || '/';
+                const next = (raw.startsWith('/') && !raw.startsWith('//')) ? raw : '/';
                 window.location.href = next;
             } else {
                 errorBox.textContent = data.detail || '注册失败';

@@ -861,8 +861,10 @@
         const provider = byId('translation-provider')?.value || 'llm';
         const localBaseUrl = (byId('translation-local-base-url')?.value || '').trim();
         const localModel = (byId('translation-local-model')?.value || '').trim();
-        const localApiKey = (byId('translation-local-api-key')?.value || '').trim();
-        const volcApiKey = (byId('translation-volcengine-api-key')?.value || '').trim();
+        const localApiKeyRaw = byId('translation-local-api-key')?.value || '';
+        const localApiKey = isMasked(localApiKeyRaw) ? undefined : localApiKeyRaw.trim();
+        const volcApiKeyRaw = byId('translation-volcengine-api-key')?.value || '';
+        const volcApiKey = isMasked(volcApiKeyRaw) ? undefined : volcApiKeyRaw.trim();
         const useLocal = provider === 'local_llm';
         const useVolcengine = provider === 'volcengine_ark';
         if (useLocal && !localBaseUrl) {
@@ -873,7 +875,7 @@
             showToast('请填写本地翻译模型名', 'error');
             return;
         }
-        if (useVolcengine && !volcApiKey) {
+        if (useVolcengine && volcApiKey !== undefined && !volcApiKey) {
             showToast('请填写 Ark API Key', 'error');
             return;
         }
@@ -886,13 +888,13 @@
         if (useLocal) {
             payload.enabled = !!byId('translation-local-enabled')?.checked || (!!localBaseUrl && !!localModel);
             payload.base_url = localBaseUrl;
-            payload.api_key = localApiKey;
+            if (localApiKey !== undefined) payload.api_key = localApiKey;
             payload.model = localModel;
             payload.timeout = readNumber('translation-local-timeout', 120);
         } else if (useVolcengine) {
-            payload.enabled = !!byId('translation-volcengine-enabled')?.checked || !!volcApiKey;
+            payload.enabled = !!byId('translation-volcengine-enabled')?.checked || (volcApiKey !== undefined && !!volcApiKey);
             payload.base_url = byId('translation-volcengine-base-url')?.value || 'https://ark.cn-beijing.volces.com/api/v3';
-            payload.api_key = volcApiKey;
+            if (volcApiKey !== undefined) payload.api_key = volcApiKey;
             payload.model = byId('translation-volcengine-model')?.value || 'doubao-seed-translation-250915';
             payload.timeout = readNumber('translation-volcengine-timeout', 60);
         }
@@ -921,13 +923,14 @@
             || byId('tts-volcengine-default-voice')?.value
             || 'zh_female_shuangkuaisisi_moon_bigtts';
         const appid = (byId('tts-volcengine-app-id')?.value || '').trim();
-        const accessToken = (byId('tts-volcengine-token')?.value || '').trim();
-        const enabledFromForm = !!byId('tts-volcengine-enabled')?.checked || (!!appid && !!accessToken);
+        const accessTokenRaw = byId('tts-volcengine-token')?.value || '';
+        const accessToken = isMasked(accessTokenRaw) ? undefined : accessTokenRaw.trim();
+        const enabledFromForm = !!byId('tts-volcengine-enabled')?.checked || (!!appid && accessToken !== undefined && !!accessToken);
         if (!text.trim()) {
             showToast('请先输入TTS测试文本', 'error');
             return;
         }
-        if (!appid || !accessToken) {
+        if (!appid || (accessToken !== undefined && !accessToken)) {
             showToast('请填写火山 TTS 的 appid 和 access_token', 'error');
             return;
         }
@@ -935,19 +938,18 @@
             const resp = await fetch(ttsTestEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+                body: JSON.stringify(Object.assign({
                     provider: 'volcengine',
                     text,
                     voice_type: voice,
                     enabled: enabledFromForm,
                     appid,
-                    access_token: accessToken,
                     resource_id: byId('tts-volcengine-resource-id')?.value || 'seed-tts-1.0',
                     cluster: byId('tts-volcengine-cluster')?.value || 'volcano_tts',
                     api_url: byId('tts-volcengine-api-url')?.value || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional',
                     sample_rate: readNumber('tts-volcengine-sample-rate', 24000),
                     timeout: readNumber('tts-volcengine-timeout', 120),
-                }),
+                }, accessToken !== undefined ? { access_token: accessToken } : {})),
             });
             const data = await resp.json().catch(() => ({}));
             if (!resp.ok) {
