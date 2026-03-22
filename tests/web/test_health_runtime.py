@@ -15,9 +15,8 @@ def test_health_reports_worker_missing_when_no_heartbeat(client):
     payload = response.json()
 
     assert payload["status"] == "healthy"
-    assert payload["worker_alive"] is False
-    assert payload["worker_reason"] in {"heartbeat_missing", "stale", "pid_dead", "not_running"}
-    assert set(payload["queue"].keys()) == {"queued", "active", "failed", "total"}
+    assert payload["worker"]["alive"] is False
+    assert payload["worker"]["reason"] in {"heartbeat_missing", "stale", "pid_dead", "not_running"}
 
 
 def test_health_reports_worker_alive_with_fresh_heartbeat(client):
@@ -39,10 +38,10 @@ def test_health_reports_worker_alive_with_fresh_heartbeat(client):
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["worker_alive"] is True
-    assert payload["worker_reason"] == "ok"
-    assert payload["worker_pid"] == os.getpid()
-    assert isinstance(payload["last_worker_heartbeat"], float)
+    assert payload["worker"]["alive"] is True
+    assert payload["worker"]["reason"] == "ok"
+    assert payload["worker"]["pid"] == os.getpid()
+    assert isinstance(payload["worker"]["last_heartbeat"], float)
 
 
 def test_runtime_endpoint_contains_worker_and_queue(client):
