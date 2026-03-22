@@ -724,6 +724,24 @@
 - `./.venv/bin/python -m pytest -q tests/web/test_pages_http.py tests/e2e/test_frontend_playwright.py -k 'creation_review_panel or creation_review_actions or task_detail_supports_creation_review_actions'` → `2 passed, 21 deselected`
 
 
+## 2026-03-22 06:20 - Railway 部署端口路由修复
+
+**根因**:
+- Dockerfile 中 `EXPOSE 9000` 可能导致 Railway 将流量路由到 9000 端口，而应用实际监听 Railway 分配的 `PORT`（8080），造成端口不匹配
+- 缺少 `railway.toml` 显式配置，Railway 只能依赖 Dockerfile 推断部署参数
+
+**处理**:
+- `Dockerfile`
+  - 移除硬编码 `EXPOSE 9000`，避免 Railway 推断错误的目标端口
+- `railway.toml`（新增）
+  - 显式配置启动命令、健康检查路径 `/api/health`（30s 超时）、失败重启策略（最多 3 次）
+- `workflow/architecture.md`
+  - 更新服务拓扑：API 端口改为动态（`PORT` 环境变量），新增 Railway 部署配置说明
+
+**验证**:
+- Docker 本地构建 + `PORT=8080` 运行，`/api/health` 正常返回 200
+- `python -m pytest -q --ignore=tests/e2e/ --tb=short` → `257 passed, 2 failed`（2 个为 pre-existing TaskStore 同步问题）
+
 ## 2026-03-14 12:42 - Dashboard 首页去脆弱化
 
 **根因**:

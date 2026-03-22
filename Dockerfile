@@ -12,5 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONPATH=/app/src
-EXPOSE 9000
+# Railway injects PORT at runtime; no hardcoded EXPOSE needed.
+# For local Docker usage the default is 9000 (see start_server.py).
 CMD ["python", "scripts/start_server.py"]
