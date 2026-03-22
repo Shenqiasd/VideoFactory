@@ -528,17 +528,29 @@ def _test_audio_root() -> Path:
     return Path("/tmp/video-factory/system-tests")
 
 
+def _ensure_config_file(path: Path) -> None:
+    """When settings.yaml is absent, bootstrap it from settings.example.yaml."""
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    example = path.parent / "settings.example.yaml"
+    if example.exists():
+        import shutil
+        shutil.copy2(example, path)
+        logger.info("配置文件不存在，已从 %s 初始化", example)
+    else:
+        path.write_text("{}\n", encoding="utf-8")
+        logger.info("配置文件不存在，已创建空配置: %s", path)
+
+
 def _read_yaml_config() -> dict[str, Any]:
     path = _config_file_path()
-    if not path.exists():
-        raise HTTPException(status_code=500, detail=f"配置文件不存在: {path}")
+    _ensure_config_file(path)
     try:
         content = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(content, dict):
             raise ValueError("配置文件格式异常")
         return content
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取配置失败: {str(e)}") from e
 
