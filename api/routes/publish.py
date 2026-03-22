@@ -3,8 +3,10 @@ import os
 import json
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi import File, Form, UploadFile
+
+from api.auth import require_auth
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
@@ -226,7 +228,7 @@ def _build_account_payload(account: dict) -> dict:
     item["cookie_filename"] = Path(cookie_path).name if cookie_path else ""
     return item
 
-@router.post("/accounts")
+@router.post("/accounts", dependencies=[Depends(require_auth)])
 async def create_account(req: AccountCreate):
     """创建账号"""
     db = get_db()
@@ -254,7 +256,7 @@ async def create_account(req: AccountCreate):
     return {"message": "账号已创建", "account_id": account_id}
 
 
-@router.post("/accounts/upload")
+@router.post("/accounts/upload", dependencies=[Depends(require_auth)])
 async def create_account_with_upload(
     platform: str = Form(...),
     name: str = Form(...),
@@ -297,7 +299,7 @@ async def get_account_config():
     }
 
 
-@router.post("/accounts/{account_id}/cookie")
+@router.post("/accounts/{account_id}/cookie", dependencies=[Depends(require_auth)])
 async def replace_account_cookie(
     account_id: str,
     cookie_file: UploadFile = File(...),
@@ -347,7 +349,7 @@ async def replace_account_cookie(
         "account": _build_account_payload(refreshed) if refreshed else None,
     }
 
-@router.delete("/accounts/{account_id}")
+@router.delete("/accounts/{account_id}", dependencies=[Depends(require_auth)])
 async def delete_account(account_id: str):
     """删除账号"""
     db = get_db()

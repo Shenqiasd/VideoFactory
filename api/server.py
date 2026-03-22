@@ -10,12 +10,27 @@ from contextlib import asynccontextmanager
 # 确保src在Python路径中
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from pydantic import BaseModel
 
 from core.runtime import read_worker_heartbeat
+from api.auth import (
+    _AuthRedirect,
+    _COOKIE_NAME,
+    _SESSION_MAX_AGE,
+    auth_enabled,
+    create_session_token,
+    create_user,
+    get_user_by_username,
+    registration_allowed,
+    verify_password,
+    verify_session_token,
+    _extract_session,
+)
 from api.routes.tasks import router as tasks_router
 from api.routes.production import router as production_router
 from api.routes.factory import router as factory_router
@@ -69,11 +84,120 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Auth redirect exception handler
+@app.exception_handler(_AuthRedirect)
+async def _handle_auth_redirect(request: Request, exc: _AuthRedirect):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=exc.location, status_code=302)
+
+
 # 挂载静态文件
 BASE_DIR = Path(__file__).resolve().parents[1]
 static_dir = BASE_DIR / "web" / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# ---------------------------------------------------------------------------
+# Auth routes (register / login / logout / status)
+# ---------------------------------------------------------------------------
+
+
+class _LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class _RegisterRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/register")
+async def auth_register(body: _RegisterRequest):
+    if not registration_allowed():
+        return JSONResponse(
+            status_code=403,
+            content={"success": False, "detail": "注册已关闭"},
+        )
+    username = (body.username or "").strip()
+    password = body.password or ""
+    if not username or len(username) < 2:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "detail": "用户名至少需要 2 个字符"},
+        )
+    if len(password) < 6:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "detail": "密码至少需要 6 个字符"},
+        )
+    try:
+        create_user(username, password)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=409,
+            content={"success": False, "detail": str(e)},
+        )
+    token = create_session_token(username)
+    response = JSONResponse(content={"success": True, "message": "注册成功"})
+    response.set_cookie(
+        key=_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=_SESSION_MAX_AGE,
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: _LoginRequest):
+    if not auth_enabled():
+        return {"success": True, "message": "认证未启用"}
+    username = (body.username or "").strip()
+    user = get_user_by_username(username)
+    if not user or not verify_password(body.password, user["password_hash"]):
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "detail": "用户名或密码错误"},
+        )
+    token = create_session_token(username)
+    response = JSONResponse(content={"success": True, "message": "登录成功"})
+    response.set_cookie(
+        key=_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=_SESSION_MAX_AGE,
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/auth/logout")
+async def auth_logout():
+    response = JSONResponse(content={"success": True, "message": "已退出"})
+    response.delete_cookie(key=_COOKIE_NAME, path="/")
+    return response
+
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    enabled = auth_enabled()
+    if not enabled:
+        return {"auth_enabled": False, "authenticated": True}
+    token = _extract_session(request)
+    username = verify_session_token(token) if token else None
+    return {
+        "auth_enabled": True,
+        "authenticated": username is not None,
+        "username": username,
+        "registration_allowed": registration_allowed(),
+    }
+
 
 # 注册路由 - 页面路由放在最前面（无prefix）
 app.include_router(pages_router, tags=["前端页面"])

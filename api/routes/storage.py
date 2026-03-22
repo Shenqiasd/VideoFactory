@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from api.auth import require_auth
 from core.config import Config
 from core.storage import StorageManager, LocalStorage
 
@@ -123,7 +124,7 @@ async def get_storage_files(location: str = "r2", path: str = "raw"):
     }
 
 
-@router.delete("/storage/files")
+@router.delete("/storage/files", dependencies=[Depends(require_auth)])
 async def delete_storage_files(request: Request):
     """删除存储文件"""
     data = await request.json()
@@ -148,7 +149,7 @@ async def delete_storage_files(request: Request):
     }
 
 
-@router.post("/storage/cleanup")
+@router.post("/storage/cleanup", dependencies=[Depends(require_auth)])
 async def cleanup_storage(request: Request):
     """手动触发清理"""
     data = await request.json()
@@ -202,7 +203,7 @@ async def get_cleanup_config():
     return _cleanup_config_from_settings()
 
 
-@router.put("/storage/cleanup-config")
+@router.put("/storage/cleanup-config", dependencies=[Depends(require_auth)])
 async def update_cleanup_config(request: Request):
     """更新清理配置"""
     data = await request.json()

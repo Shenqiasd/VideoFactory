@@ -5,9 +5,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+
+from api.auth import auth_enabled, registration_allowed, require_auth_page
 
 from core.project_naming import build_project_name
 from core.task import TaskStore, TaskState
@@ -391,7 +393,25 @@ async def storage_page(request: Request):
     return render_template(request, "storage.html")
 
 
-@router.get("/settings", response_class=HTMLResponse)
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Login page — redirects to /register if no users exist (bootstrap)."""
+    if not auth_enabled():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/register", status_code=302)
+    return render_template(request, "login.html")
+
+
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    """Registration page — only accessible when registration is allowed."""
+    if not registration_allowed():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/login", status_code=302)
+    return render_template(request, "register.html")
+
+
+@router.get("/settings", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def settings_page(request: Request):
     """System settings page"""
     return render_template(request, "settings.html")

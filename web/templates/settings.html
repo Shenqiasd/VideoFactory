@@ -534,6 +534,43 @@
     const asrTtsEndpoint = '/api/system/settings/asr-tts';
     const translationTestEndpoint = '/api/system/test/translation';
     const ttsTestEndpoint = '/api/system/test/tts';
+
+    // ---------- Masked-token helpers ----------
+    // Values starting with '****' are masked by the server; the user
+    // must clear the field and type a new value for it to be saved.
+    const _MASK_PREFIX = '****';
+    // Track which secret fields were loaded with masked values so we
+    // can strip them from the save payload.
+    const _maskedFields = new Set();
+
+    function isMasked(value) {
+        return typeof value === 'string' && value.startsWith(_MASK_PREFIX);
+    }
+
+    function setSecretValue(id, value) {
+        setValue(id, value);
+        if (isMasked(value)) {
+            _maskedFields.add(id);
+            const el = byId(id);
+            if (el) {
+                el.placeholder = '已配置（输入新值替换）';
+                el.addEventListener('input', function onInput() {
+                    _maskedFields.delete(id);
+                    el.removeEventListener('input', onInput);
+                }, { once: true });
+            }
+        } else {
+            _maskedFields.delete(id);
+        }
+    }
+
+    function readSecretValue(id) {
+        // If the field still holds a masked placeholder, return empty
+        // string so the server keeps the existing value.
+        if (_maskedFields.has(id)) return '';
+        return (byId(id)?.value || '').trim();
+    }
+
     const defaultVoices = [
         { id: 'zh_female_shuangkuaisisi_moon_bigtts', name: '双快思思(女)', language: 'zh-CN' },
         { id: 'zh_female_cancan_mars_bigtts', name: '灿灿(女)', language: 'zh-CN' },
@@ -651,14 +688,14 @@
                 setChecked('translation-local-enabled', localTranslation.enabled);
             }
             setValue('translation-local-base-url', localTranslation.base_url || 'http://127.0.0.1:1234/v1');
-            setValue('translation-local-api-key', localTranslation.api_key || '');
+            setSecretValue('translation-local-api-key', localTranslation.api_key || '');
             setValue('translation-local-model', localTranslation.model || '');
             setValue('translation-local-timeout', localTranslation.timeout || 120);
             if (Object.prototype.hasOwnProperty.call(volcTranslation, 'enabled')) {
                 setChecked('translation-volcengine-enabled', volcTranslation.enabled);
             }
             setValue('translation-volcengine-base-url', volcTranslation.base_url || 'https://ark.cn-beijing.volces.com/api/v3');
-            setValue('translation-volcengine-api-key', volcTranslation.api_key || '');
+            setSecretValue('translation-volcengine-api-key', volcTranslation.api_key || '');
             setValue('translation-volcengine-model', volcTranslation.model || 'doubao-seed-translation-250915');
             setValue('translation-volcengine-timeout', volcTranslation.timeout || 60);
             toggleTranslationProviderPanels();
@@ -677,7 +714,7 @@
 
         setChecked('asr-volcengine-enabled', asrVolc.enabled);
         setValue('asr-volcengine-app-id', asrVolc.app_id || '');
-        setValue('asr-volcengine-token', asrVolc.token || '');
+        setSecretValue('asr-volcengine-token', asrVolc.token || '');
         setValue('asr-volcengine-http-url', asrVolc.http_url || '');
         setValue('asr-volcengine-ws-url', asrVolc.ws_url || '');
         setValue('asr-volcengine-timeout', asrVolc.timeout || 120);
@@ -687,7 +724,7 @@
             setChecked('tts-volcengine-enabled', ttsVolc.enabled);
         }
         setValue('tts-volcengine-app-id', ttsVolc.appid || ttsVolc.app_id || '');
-        setValue('tts-volcengine-token', ttsVolc.access_token || ttsVolc.token || '');
+        setSecretValue('tts-volcengine-token', ttsVolc.access_token || ttsVolc.token || '');
         setValue('tts-volcengine-cluster', ttsVolc.cluster || 'volcano_tts');
         setValue('tts-volcengine-resource-id', ttsVolc.resource_id || 'seed-tts-1.0');
         setValue('tts-volcengine-api-url', ttsVolc.api_url || ttsVolc.synthesis_url || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional');
@@ -702,6 +739,10 @@
     async function loadAsrTtsSettings() {
         try {
             const response = await fetch(asrTtsEndpoint, { method: 'GET' });
+            if (response.status === 401) {
+                window.location.href = '/login?next=/settings';
+                return;
+            }
             if (!response.ok) {
                 throw new Error('load_failed');
             }
@@ -715,7 +756,7 @@
     function buildAsrTtsPayload() {
         const selectedVoice = byId('tts-volcengine-default-voice')?.value || 'zh_female_shuangkuaisisi_moon_bigtts';
         const appid = byId('tts-volcengine-app-id')?.value || '';
-        const accessToken = byId('tts-volcengine-token')?.value || '';
+        const accessToken = readSecretValue('tts-volcengine-token');
         const apiUrl = byId('tts-volcengine-api-url')?.value || '';
         const voices = Array.isArray(window._ttsVoices) && window._ttsVoices.length > 0
             ? window._ttsVoices
@@ -728,14 +769,14 @@
                 local_llm: {
                     enabled: !!byId('translation-local-enabled')?.checked,
                     base_url: byId('translation-local-base-url')?.value || 'http://127.0.0.1:1234/v1',
-                    api_key: byId('translation-local-api-key')?.value || '',
+                    api_key: readSecretValue('translation-local-api-key'),
                     model: byId('translation-local-model')?.value || '',
                     timeout: readNumber('translation-local-timeout', 120),
                 },
                 volcengine_ark: {
                     enabled: !!byId('translation-volcengine-enabled')?.checked,
                     base_url: byId('translation-volcengine-base-url')?.value || 'https://ark.cn-beijing.volces.com/api/v3',
-                    api_key: byId('translation-volcengine-api-key')?.value || '',
+                    api_key: readSecretValue('translation-volcengine-api-key'),
                     model: byId('translation-volcengine-model')?.value || 'doubao-seed-translation-250915',
                     timeout: readNumber('translation-volcengine-timeout', 60),
                 },
@@ -758,7 +799,7 @@
                 volcengine: {
                     enabled: !!byId('asr-volcengine-enabled')?.checked,
                     app_id: byId('asr-volcengine-app-id')?.value || '',
-                    token: byId('asr-volcengine-token')?.value || '',
+                    token: readSecretValue('asr-volcengine-token'),
                     http_url: byId('asr-volcengine-http-url')?.value || '',
                     ws_url: byId('asr-volcengine-ws-url')?.value || '',
                     timeout: readNumber('asr-volcengine-timeout', 120),

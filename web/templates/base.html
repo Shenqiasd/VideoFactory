@@ -124,6 +124,18 @@
                 </a>
             </nav>
 
+            <!-- Auth: Logout -->
+            <div id="auth-logout-section" class="px-3 hidden">
+                <div class="flex items-center gap-3 px-3 py-1.5 text-[12px] text-fg-sub">
+                    <i data-lucide="user" class="w-[16px] h-[16px]"></i>
+                    <span id="auth-username"></span>
+                </div>
+                <button onclick="doLogout()" class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-[14px] text-fg-sub w-full">
+                    <i data-lucide="log-out" class="w-[18px] h-[18px]"></i>
+                    退出登录
+                </button>
+            </div>
+
             <!-- Service Status (bottom) -->
             <div class="px-3 py-4 border-t border-border"
                  hx-get="/web/partials/service_status_sidebar"
@@ -149,6 +161,27 @@
 
     <!-- Global JS -->
     <script>
+        // Auth: check status and show logout if needed
+        (async function checkAuth() {
+            try {
+                const resp = await fetch('/api/auth/status');
+                const data = await resp.json();
+                if (data.auth_enabled && data.authenticated) {
+                    const el = document.getElementById('auth-logout-section');
+                    if (el) el.classList.remove('hidden');
+                    const nameEl = document.getElementById('auth-username');
+                    if (nameEl && data.username) nameEl.textContent = data.username;
+                }
+            } catch (_) {}
+        })();
+
+        async function doLogout() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch (_) {}
+            window.location.href = '/login';
+        }
+        window.doLogout = doLogout;
         function safeCreateIcons() {
             if (window.lucide && typeof window.lucide.createIcons === 'function') {
                 window.lucide.createIcons();
