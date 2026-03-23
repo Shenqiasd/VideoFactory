@@ -40,9 +40,44 @@ from api.routes.pages import router as pages_router
 from api.routes.publish import router as publish_router
 from api.routes.storage import router as storage_router
 from api.routes.monitor import router as monitor_router
+from api.routes.oauth import router as oauth_router
 from core.scheduler import StorageCleanupScheduler
+from platform_services.registry import PlatformRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _register_platform_services(config) -> None:
+    """根据配置注册 YouTube / Bilibili 平台服务。"""
+    callback_base = config.get("oauth", "callback_base_url", default="http://localhost:9000")
+
+    # YouTube
+    yt_client_id = config.get("oauth", "youtube", "client_id", default="")
+    yt_client_secret = config.get("oauth", "youtube", "client_secret", default="")
+    if yt_client_id and yt_client_secret:
+        from platform_services.youtube import YouTubeService
+        PlatformRegistry.register(YouTubeService(
+            client_id=yt_client_id,
+            client_secret=yt_client_secret,
+            redirect_uri=f"{callback_base}/api/oauth/callback/youtube",
+        ))
+        logger.info("YouTube 平台服务已注册")
+    else:
+        logger.warning("YouTube OAuth 未配置 (缺少 client_id/client_secret)，跳过注册")
+
+    # Bilibili
+    bili_client_id = config.get("oauth", "bilibili", "client_id", default="")
+    bili_client_secret = config.get("oauth", "bilibili", "client_secret", default="")
+    if bili_client_id and bili_client_secret:
+        from platform_services.bilibili import BilibiliService
+        PlatformRegistry.register(BilibiliService(
+            client_id=bili_client_id,
+            client_secret=bili_client_secret,
+            redirect_uri=f"{callback_base}/api/oauth/callback/bilibili",
+        ))
+        logger.info("Bilibili 平台服务已注册")
+    else:
+        logger.warning("Bilibili OAuth 未配置 (缺少 client_id/client_secret)，跳过注册")
 
 
 @asynccontextmanager
@@ -58,6 +93,9 @@ async def lifespan(app: FastAPI):
     cleanup_scheduler = StorageCleanupScheduler()
     cleanup_scheduler.start()
     app.state.storage_cleanup_scheduler = cleanup_scheduler
+
+    # 注册平台服务
+    _register_platform_services(config)
 
     yield
 
@@ -211,6 +249,7 @@ app.include_router(publish_router, prefix="/api/publish", tags=["发布账号"])
 app.include_router(system_router, prefix="/api/system", tags=["系统"])
 app.include_router(storage_router, prefix="/api", tags=["存储管理"])
 app.include_router(monitor_router, prefix="/api/monitor", tags=["频道监控"])
+app.include_router(oauth_router, prefix="/api/oauth", tags=["平台OAuth"])
 
 
 @app.get("/api")
