@@ -243,7 +243,11 @@ async def auth_logout():
 async def auth_status(request: Request):
     enabled = auth_enabled()
     if not enabled:
-        return {"auth_enabled": False, "authenticated": True}
+        return {
+            "auth_enabled": False,
+            "authenticated": False,
+            "registration_allowed": registration_allowed(),
+        }
     token = _extract_session(request)
     username = verify_session_token(token) if token else None
     return {
