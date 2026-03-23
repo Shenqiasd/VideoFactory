@@ -91,6 +91,7 @@ async def authorize(platform: str, request: Request):
     try:
         auth_url = await service.get_auth_url(state=state)
     except PlatformError as e:
+        _validate_oauth_state(state)  # 清理已创建的 state，防止内存泄漏
         logger.error("生成授权 URL 失败: platform=%s, error=%s", platform, e)
         return JSONResponse(
             status_code=500,
