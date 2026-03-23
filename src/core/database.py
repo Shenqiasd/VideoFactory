@@ -21,6 +21,7 @@ class Database:
         "accounts", "publish_tasks", "publish_jobs", "publish_job_events",
         "platform_accounts", "oauth_credentials", "publish_tasks_v2",
         "publish_templates",
+        "content_analytics",
     }
 
     def __init__(self, db_path: str = "data/video_factory.db"):
@@ -237,6 +238,32 @@ class Database:
                 "ON platform_accounts(platform, status)"
             )
 
+            # ---- Sprint 5: 内容数据分析 ----
+
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS content_analytics (
+                    id TEXT PRIMARY KEY,
+                    publish_task_id TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    post_id TEXT NOT NULL,
+                    views INTEGER DEFAULT 0,
+                    likes INTEGER DEFAULT 0,
+                    comments INTEGER DEFAULT 0,
+                    shares INTEGER DEFAULT 0,
+                    raw_data TEXT DEFAULT '{}',
+                    fetched_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(publish_task_id, platform),
+                    FOREIGN KEY (publish_task_id) REFERENCES publish_tasks_v2(id) ON DELETE CASCADE
+                )
+            """)
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_content_analytics_task "
+                "ON content_analytics(publish_task_id)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_content_analytics_platform "
+                "ON content_analytics(platform)"
+            )
             self.conn.commit()
 
     def _ensure_column(self, table: str, column: str, definition: str):
@@ -994,6 +1021,129 @@ class Database:
             )
             self.conn.commit()
             return cursor.rowcount > 0
+
+    # ========== content_analytics 方法 (Sprint 5) ==========
+
+    def upsert_content_analytics(
+        self,
+        *,
+        publish_task_id: str,
+        platform: str,
+        post_id: str,
+        views: int = 0,
+        likes: int = 0,
+        comments: int = 0,
+        shares: int = 0,
+        raw_data: Optional[dict] = None,
+    ) -> None:
+        """插入或更新内容分析数据"""
+        import uuid
+        now = datetime.now().isoformat()
+        with self._lock:
+            self.conn.execute("""
+                INSERT INTO content_analytics (
+                    id, publish_task_id, platform, post_id,
+                    views, likes, comments, shares, raw_data, fetched_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(publish_task_id, platform) DO UPDATE SET
+                    post_id = excluded.post_id,
+                    views = excluded.views,
+                    likes = excluded.likes,
+                    comments = excluded.comments,
+                    shares = excluded.shares,
+                    raw_data = excluded.raw_data,
+                    fetched_at = excluded.fetched_at
+            """, (
+                str(uuid.uuid4()),
+                publish_task_id,
+                platform,
+                post_id,
+                views,
+                likes,
+                comments,
+                shares,
+                json.dumps(raw_data or {}, ensure_ascii=False),
+                now,
+            ))
+            self.conn.commit()
+
+    def get_content_analytics(self, publish_task_id: str) -> List[dict]:
+        """获取单个发布任务的历史分析数据"""
+        with self._lock:
+            cursor = self.conn.execute(
+                "SELECT * FROM content_analytics WHERE publish_task_id = ? ORDER BY fetched_at DESC",
+                (publish_task_id,),
+            )
+            results = []
+            for row in cursor.fetchall():
+                item = dict(row)
+                item["raw_data"] = json.loads(item.get("raw_data") or "{}")
+                results.append(item)
+            return results
+
+    def get_analytics_summary(self) -> dict:
+        """按平台汇总分析数据（每个 (task, platform) 仅一行，无需去重）"""
+        with self._lock:
+            cursor = self.conn.execute("""
+                SELECT
+                    platform,
+                    COUNT(DISTINCT publish_task_id) AS total_videos,
+                    SUM(views) AS total_views,
+                    SUM(likes) AS total_likes,
+                    SUM(comments) AS total_comments,
+                    SUM(shares) AS total_shares
+                FROM content_analytics
+                GROUP BY platform
+            """)
+            platforms = []
+            totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0, "videos": 0}
+            for row in cursor.fetchall():
+                item = dict(row)
+                platforms.append(item)
+                totals["views"] += item["total_views"] or 0
+                totals["likes"] += item["total_likes"] or 0
+                totals["comments"] += item["total_comments"] or 0
+                totals["shares"] += item["total_shares"] or 0
+                totals["videos"] += item["total_videos"] or 0
+            return {"platforms": platforms, "totals": totals}
+
+    def get_top_content(self, limit: int = 10) -> List[dict]:
+        """获取按播放量排序的热门内容"""
+        with self._lock:
+            cursor = self.conn.execute("""
+                SELECT
+                    ca.publish_task_id,
+                    ca.platform,
+                    ca.post_id,
+                    ca.views,
+                    ca.likes,
+                    ca.comments,
+                    ca.shares,
+                    ca.fetched_at,
+                    pt.title,
+                    pt.published_at
+                FROM content_analytics ca
+                LEFT JOIN publish_tasks_v2 pt ON ca.publish_task_id = pt.id
+                ORDER BY ca.views DESC
+                LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_all_oauth_credentials(self) -> List[dict]:
+        """获取所有 OAuth 凭证（用于 token 健康检查）"""
+        with self._lock:
+            cursor = self.conn.execute(
+                "SELECT * FROM oauth_credentials ORDER BY updated_at DESC"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def count_publish_tasks_v2_by_status(self) -> dict:
+        """按状态分组统计 v2 发布任务数量（用于健康检查）"""
+        with self._lock:
+            cursor = self.conn.execute(
+                "SELECT status, COUNT(*) AS count FROM publish_tasks_v2 GROUP BY status"
+            )
+            return {row["status"]: row["count"] for row in cursor.fetchall()}
 
     def close(self):
         """关闭数据库连接"""

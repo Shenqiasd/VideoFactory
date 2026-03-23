@@ -399,6 +399,12 @@ async def publish_v2_page(request: Request):
     return render_template(request, "publish_v2.html")
 
 
+@router.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request):
+    """Data analytics dashboard page"""
+    return render_template(request, "analytics.html")
+
+
 @router.get("/storage", response_class=HTMLResponse)
 async def storage_page(request: Request):
     """Storage management page"""
