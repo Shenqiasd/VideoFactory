@@ -216,10 +216,8 @@ async def callback(
     # 1. 验证 state
     state_data = _validate_oauth_state(state)
     if not state_data or state_data.get("platform") != platform:
-        return JSONResponse(
-            status_code=400,
-            content={"success": False, "detail": "无效的 OAuth state，可能已过期"},
-        )
+        _oauth_completions[state] = {"status": "error", "platform": platform, "reason": "无效的 OAuth state，可能已过期"}
+        return _build_callback_response(success=False, platform=platform, reason="无效的 OAuth state，可能已过期")
 
     # 2. 获取平台服务
     service = PlatformRegistry.get(platform)
@@ -319,7 +317,7 @@ def _build_callback_response(*, success: bool, platform: str, reason: str = "") 
 <script>
   // 通知父窗口（如果存在）
   if (window.opener) {{
-    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {'true' if success else 'false'}, platform: {json.dumps(platform)}}}, '*'); }} catch(e) {{}}
+    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {'true' if success else 'false'}, platform: {json.dumps(platform).replace('</', '<\/')}}}, '*'); }} catch(e) {{}}
   }}
   // 2 秒后自动关闭弹窗
   setTimeout(function() {{
