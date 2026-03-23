@@ -24,11 +24,23 @@ def _config_file_path() -> Path:
     return Path(__file__).resolve().parents[2] / "config" / "settings.yaml"
 
 
+def _ensure_config_file(path: Path) -> None:
+    """When settings.yaml is absent, bootstrap it from settings.example.yaml."""
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    example = path.parent / "settings.example.yaml"
+    if example.exists():
+        import shutil
+        shutil.copy2(example, path)
+    else:
+        path.write_text("{}\n", encoding="utf-8")
+
+
 def _read_yaml_config() -> dict[str, Any]:
     path = _config_file_path()
-    if not path.exists():
-        raise HTTPException(status_code=500, detail=f"配置文件不存在: {path}")
     try:
+        _ensure_config_file(path)
         content = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(content, dict):
             raise ValueError("配置文件格式异常")
