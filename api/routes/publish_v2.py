@@ -192,6 +192,13 @@ async def delete_task(task_id: str):
         await queue.cancel_task(task_id)
         return {"success": True, "message": "任务已取消"}
 
+    # Reject deletion of actively-publishing tasks
+    if task["status"] == "publishing":
+        return JSONResponse(
+            status_code=409,
+            content={"success": False, "detail": "任务正在发布中，无法删除"},
+        )
+
     # For other statuses (failed, cancelled, published), delete directly
     db.delete_publish_task_v2(task_id)
     return {"success": True, "message": "任务已删除"}

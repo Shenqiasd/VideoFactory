@@ -215,6 +215,14 @@ class TestDeleteTask:
         assert resp.status_code == 200
         mock_db.delete_publish_task_v2.assert_called_once()
 
+    def test_delete_publishing_task_rejected(self, client, mock_db):
+        """DELETE /tasks/{id} should return 409 for in-flight publishing task."""
+        task = _task_record(status="publishing")
+        mock_db.get_publish_task_v2 = MagicMock(return_value=task)
+
+        resp = client.delete(f"/api/publish/v2/tasks/{task['id']}")
+        assert resp.status_code == 409
+
     def test_delete_nonexistent_task(self, client, mock_db):
         """DELETE /tasks/{id} should return 404 for missing task."""
         mock_db.get_publish_task_v2 = MagicMock(return_value=None)
