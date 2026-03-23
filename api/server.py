@@ -40,6 +40,7 @@ from api.routes.pages import router as pages_router
 from api.routes.publish import router as publish_router
 from api.routes.storage import router as storage_router
 from api.routes.monitor import router as monitor_router
+from api.routes.oauth import router as oauth_router
 from core.scheduler import StorageCleanupScheduler
 
 logger = logging.getLogger(__name__)
@@ -211,6 +212,7 @@ app.include_router(publish_router, prefix="/api/publish", tags=["发布账号"])
 app.include_router(system_router, prefix="/api/system", tags=["系统"])
 app.include_router(storage_router, prefix="/api", tags=["存储管理"])
 app.include_router(monitor_router, prefix="/api/monitor", tags=["频道监控"])
+app.include_router(oauth_router, prefix="/api/oauth", tags=["平台OAuth"])
 
 
 @app.get("/api")
