@@ -42,6 +42,7 @@ from api.routes.storage import router as storage_router
 from api.routes.monitor import router as monitor_router
 from api.routes.oauth import router as oauth_router
 from api.routes.publish_v2 import router as publish_v2_router, set_publish_queue
+from api.routes.templates import router as templates_router
 from core.scheduler import StorageCleanupScheduler
 
 logger = logging.getLogger(__name__)
@@ -262,6 +263,7 @@ app.include_router(storage_router, prefix="/api", tags=["存储管理"])
 app.include_router(monitor_router, prefix="/api/monitor", tags=["频道监控"])
 app.include_router(oauth_router, prefix="/api/oauth", tags=["平台OAuth"])
 app.include_router(publish_v2_router, prefix="/api/publish/v2", tags=["多平台发布V2"])
+app.include_router(templates_router, prefix="/api/templates", tags=["发布模板"])
 
 
 @app.get("/api")
