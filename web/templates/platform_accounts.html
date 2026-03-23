@@ -254,6 +254,8 @@ function platformAccounts() {
 
                 this.$nextTick(function() { safeCreateIcons(); });
 
+                this.stopTimers();
+
                 var self = this;
                 this.countdownTimer = setInterval(function() {
                     self.countdown--;

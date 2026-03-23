@@ -13,9 +13,11 @@ OAuth 认证路由 — 多平台统一 OAuth 流程。
 - DELETE /oauth/accounts/{id}        解绑账号
 """
 
+import json
 import logging
 import secrets
 import uuid
+from html import escape
 from typing import Optional
 
 from cachetools import TTLCache
@@ -291,13 +293,15 @@ async def callback(
 
 def _build_callback_response(*, success: bool, platform: str, reason: str = "") -> HTMLResponse:
     """构建 OAuth 回调响应：弹窗模式返回自动关闭 HTML，否则重定向。"""
+    safe_platform = escape(platform)
+    safe_label = escape(_PLATFORM_LOOKUP.get(platform, {}).get('label', platform))
     if success:
         title = "授权成功"
-        message = f"{_PLATFORM_LOOKUP.get(platform, {}).get('label', platform)} 账号绑定成功！"
+        message = f"{safe_label} 账号绑定成功！"
         color = "#16a34a"
     else:
         title = "授权失败"
-        message = f"授权被拒绝: {reason}" if reason else "授权失败"
+        message = f"授权被拒绝: {escape(reason)}" if reason else "授权失败"
         color = "#dc2626"
 
     html = f"""<!DOCTYPE html>
@@ -319,7 +323,7 @@ def _build_callback_response(*, success: bool, platform: str, reason: str = "") 
 <script>
   // 通知父窗口（如果存在）
   if (window.opener) {{
-    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {'true' if success else 'false'}, platform: '{platform}'}}, '*'); }} catch(e) {{}}
+    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {'true' if success else 'false'}, platform: {json.dumps(platform)}}}, '*'); }} catch(e) {{}}
   }}
   // 2 秒后自动关闭弹窗
   setTimeout(function() {{
