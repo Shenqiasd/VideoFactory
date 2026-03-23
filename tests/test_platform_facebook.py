@@ -283,18 +283,32 @@ class TestHandleCallback:
 
 class TestRefreshToken:
     @pytest.mark.asyncio
-    async def test_successful_refresh(self, facebook_service, valid_credential):
-        """刷新成功应返回新的长期 token。"""
-        refresh_response = MagicMock(status_code=200)
-        refresh_response.json.return_value = {
-            "access_token": "fb_refreshed_token",
+    async def test_successful_refresh_with_page_token(self, facebook_service, valid_credential):
+        """刷新成功应重新获取 Page Token 并保留 raw 元数据。"""
+        # Long-lived token exchange response
+        token_resp = MagicMock(status_code=200)
+        token_resp.json.return_value = {
+            "access_token": "fb_new_user_token",
             "expires_in": 5184000,
         }
 
-        async def mock_get(url, **kwargs):
-            return refresh_response
+        # Pages response with matching page_id from raw
+        pages_resp = MagicMock(status_code=200)
+        pages_resp.json.return_value = {
+            "data": [
+                {"id": "page_001", "access_token": "new_page_token_001"},
+                {"id": "page_002", "access_token": "new_page_token_002"},
+            ]
+        }
 
-        with patch("platform_services.meta_base.httpx.AsyncClient") as MockClient:
+        async def mock_get(url, **kwargs):
+            if "/oauth/access_token" in url:
+                return token_resp
+            elif "/accounts" in url:
+                return pages_resp
+            return MagicMock(status_code=404)
+
+        with patch("platform_services.facebook.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -303,8 +317,54 @@ class TestRefreshToken:
 
             new_cred = await facebook_service.refresh_token(valid_credential)
 
-        assert new_cred.access_token == "fb_refreshed_token"
+        # Page token should be for page_001 (matching raw)
+        assert new_cred.access_token == "new_page_token_001"
+        # User token stored as refresh_token
+        assert new_cred.refresh_token == "fb_new_user_token"
         assert new_cred.expires_at > int(time.time())
+        # raw should be preserved (not overwritten with token exchange response)
+        assert new_cred.raw == valid_credential.raw
+        raw_data = json.loads(new_cred.raw)
+        assert raw_data["page_id"] == "page_001"
+        assert raw_data["user_id"] == "user_001"
+
+    @pytest.mark.asyncio
+    async def test_refresh_uses_refresh_token_not_access_token(self, facebook_service, valid_credential):
+        """刷新时应使用 refresh_token (user token)，而非 access_token (page token)。"""
+        exchanged_tokens = []
+
+        token_resp = MagicMock(status_code=200)
+        token_resp.json.return_value = {
+            "access_token": "new_user_token",
+            "expires_in": 5184000,
+        }
+
+        pages_resp = MagicMock(status_code=200)
+        pages_resp.json.return_value = {
+            "data": [{"id": "page_001", "access_token": "new_page_tok"}]
+        }
+
+        async def mock_get(url, **kwargs):
+            params = kwargs.get("params", {})
+            if "/oauth/access_token" in url:
+                exchanged_tokens.append(params.get("fb_exchange_token"))
+                return token_resp
+            elif "/accounts" in url:
+                return pages_resp
+            return MagicMock(status_code=404)
+
+        with patch("platform_services.facebook.httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client
+
+            await facebook_service.refresh_token(valid_credential)
+
+        # Should have exchanged the user token (refresh_token), not page token (access_token)
+        assert exchanged_tokens[0] == valid_credential.refresh_token
+        assert exchanged_tokens[0] != valid_credential.access_token
 
     @pytest.mark.asyncio
     async def test_refresh_failure(self, facebook_service, valid_credential):
@@ -316,7 +376,7 @@ class TestRefreshToken:
         async def mock_get(url, **kwargs):
             return mock_resp
 
-        with patch("platform_services.meta_base.httpx.AsyncClient") as MockClient:
+        with patch("platform_services.facebook.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)

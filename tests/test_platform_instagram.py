@@ -321,6 +321,39 @@ class TestRefreshToken:
 
         assert new_cred.access_token == "ig_refreshed_token"
         assert new_cred.expires_at > int(time.time())
+        # raw should be preserved (not overwritten with token exchange response)
+        assert new_cred.raw == valid_credential.raw
+        raw_data = json.loads(new_cred.raw)
+        assert raw_data["ig_user_id"] == "ig_user_001"
+        assert raw_data["page_id"] == "page_001"
+
+    @pytest.mark.asyncio
+    async def test_refresh_uses_refresh_token(self, instagram_service, valid_credential):
+        """刷新时应使用 refresh_token，而非 access_token。"""
+        exchanged_tokens = []
+
+        refresh_resp = MagicMock(status_code=200)
+        refresh_resp.json.return_value = {
+            "access_token": "ig_new_token",
+            "expires_in": 5184000,
+        }
+
+        async def mock_get(url, **kwargs):
+            params = kwargs.get("params", {})
+            if "/oauth/access_token" in url:
+                exchanged_tokens.append(params.get("fb_exchange_token"))
+            return refresh_resp
+
+        with patch("platform_services.meta_base.httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client
+
+            await instagram_service.refresh_token(valid_credential)
+
+        assert exchanged_tokens[0] == valid_credential.refresh_token
 
     @pytest.mark.asyncio
     async def test_refresh_failure(self, instagram_service, valid_credential):

@@ -151,6 +151,59 @@ class FacebookService(MetaBaseService):
         )
 
     # ------------------------------------------------------------------
+    # Token refresh — Facebook 特有逻辑
+    # ------------------------------------------------------------------
+
+    async def refresh_token(
+        self, credential: OAuthCredential,
+    ) -> OAuthCredential:
+        """
+        刷新 Facebook token。
+
+        Facebook 使用 Page Token 作为 access_token，User Token 作为 refresh_token。
+        刷新流程:
+        1. 用 long-lived user token 换取新的 long-lived user token
+        2. 用新 user token 重新获取 Page Token
+        """
+        raw_data = json.loads(credential.raw or "{}") if credential.raw else {}
+        page_id = raw_data.get("page_id", "")
+        user_id = raw_data.get("user_id", "")
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            # 1. 刷新 user token
+            data = await self._exchange_long_lived_token(
+                credential.refresh_token, client,
+            )
+            new_user_token = data["access_token"]
+            expires_in = data.get("expires_in", 5184000)
+
+            # 2. 用新 user token 获取 Page Token
+            new_page_token = new_user_token  # fallback
+            if user_id:
+                pages_resp = await client.get(
+                    f"{GRAPH_API_BASE}/{user_id}/accounts",
+                    params={"access_token": new_user_token},
+                )
+                if pages_resp.status_code == 200:
+                    pages_data = pages_resp.json()
+                    pages = pages_data.get("data", [])
+                    # 找到匹配的 Page
+                    for p in pages:
+                        if p["id"] == page_id:
+                            new_page_token = p["access_token"]
+                            break
+                    else:
+                        if pages:
+                            new_page_token = pages[0]["access_token"]
+
+        return OAuthCredential(
+            access_token=new_page_token,
+            refresh_token=new_user_token,
+            expires_at=int(time.time()) + expires_in,
+            raw=credential.raw,
+        )
+
+    # ------------------------------------------------------------------
     # 发布
     # ------------------------------------------------------------------
 

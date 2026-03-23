@@ -131,7 +131,7 @@ class MetaBaseService(PlatformService):
         """
         async with httpx.AsyncClient(timeout=30) as client:
             data = await self._exchange_long_lived_token(
-                credential.access_token, client,
+                credential.refresh_token, client,
             )
 
         new_token = data["access_token"]
@@ -141,7 +141,7 @@ class MetaBaseService(PlatformService):
             access_token=new_token,
             refresh_token=credential.refresh_token,
             expires_at=int(time.time()) + expires_in,
-            raw=json.dumps(data),
+            raw=credential.raw,
         )
 
     async def check_token_status(
