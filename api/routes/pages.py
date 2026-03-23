@@ -381,12 +381,6 @@ async def publish_page(request: Request):
     return render_template(request, "publish.html")
 
 
-@router.get("/accounts", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
-async def accounts_page(request: Request):
-    """Account management page"""
-    return render_template(request, "accounts.html")
-
-
 @router.get("/platform-accounts", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def platform_accounts_page(request: Request):
     """Platform accounts management page (OAuth-bound accounts)"""

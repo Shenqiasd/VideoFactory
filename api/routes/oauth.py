@@ -2,12 +2,15 @@
 OAuth 认证路由 — 多平台统一 OAuth 流程。
 
 提供：
-- GET  /oauth/platforms        已注册平台列表
-- GET  /oauth/authorize/{platform}  发起 OAuth 授权
-- GET  /oauth/callback/{platform}   处理 OAuth 回调
-- GET  /oauth/accounts              已绑定账号列表
-- GET  /oauth/accounts/{id}         单个账号详情
-- DELETE /oauth/accounts/{id}       解绑账号
+- GET  /oauth/platforms             已注册平台列表
+- GET  /oauth/all-platforms          所有支持平台（含未配置）
+- GET  /oauth/authorize/{platform}   发起 OAuth 授权（302 重定向）
+- POST /oauth/connect/{platform}     发起 OAuth（返回 JSON，用于弹窗）
+- GET  /oauth/connect-status/{state} 轮询 OAuth 回调完成状态
+- GET  /oauth/callback/{platform}    处理 OAuth 回调
+- GET  /oauth/accounts               已绑定账号列表
+- GET  /oauth/accounts/{id}          单个账号详情
+- DELETE /oauth/accounts/{id}        解绑账号
 """
 
 import logging
@@ -17,7 +20,7 @@ from typing import Optional
 
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from api.auth import require_auth
 from core.database import Database
@@ -50,6 +53,9 @@ def _get_db() -> Database:
 
 _oauth_states: TTLCache = TTLCache(maxsize=10000, ttl=600)
 
+# OAuth 完成状态缓存：state → {"success": bool, "platform": str, "account_id": str, ...}
+_oauth_completions: TTLCache = TTLCache(maxsize=10000, ttl=600)
+
 
 def _create_oauth_state(platform: str) -> str:
     """创建一个带随机 nonce 的 OAuth state 并缓存。"""
@@ -64,6 +70,29 @@ def _validate_oauth_state(state: str) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
+# 全平台元数据（硬编码，与 AiToEarn 对齐）
+# ---------------------------------------------------------------------------
+
+ALL_PLATFORMS = [
+    {"platform": "youtube",    "label": "YouTube",   "icon": "youtube",         "color": "#FF0000"},
+    {"platform": "bilibili",   "label": "Bilibili",  "icon": "tv",              "color": "#00A1D6"},
+    {"platform": "tiktok",     "label": "TikTok",    "icon": "music",           "color": "#000000"},
+    {"platform": "douyin",     "label": "抖音",       "icon": "music-2",         "color": "#000000"},
+    {"platform": "facebook",   "label": "Facebook",  "icon": "facebook",        "color": "#1877F2"},
+    {"platform": "instagram",  "label": "Instagram", "icon": "instagram",       "color": "#E4405F"},
+    {"platform": "twitter",    "label": "X (Twitter)","icon": "twitter",        "color": "#000000"},
+    {"platform": "pinterest",  "label": "Pinterest", "icon": "image",           "color": "#BD081C"},
+    {"platform": "linkedin",   "label": "LinkedIn",  "icon": "linkedin",        "color": "#0A66C2"},
+    {"platform": "kwai",       "label": "快手",       "icon": "video",           "color": "#FF4906"},
+    {"platform": "xiaohongshu","label": "小红书",     "icon": "book-open",       "color": "#FE2C55"},
+    {"platform": "weixin_sph", "label": "微信视频号",  "icon": "message-circle", "color": "#07C160"},
+    {"platform": "weixin_gzh", "label": "微信公众号",  "icon": "newspaper",      "color": "#07C160"},
+    {"platform": "threads",    "label": "Threads",   "icon": "at-sign",         "color": "#000000"},
+]
+
+_PLATFORM_LOOKUP = {p["platform"]: p for p in ALL_PLATFORMS}
+
+# ---------------------------------------------------------------------------
 # 路由
 # ---------------------------------------------------------------------------
 
@@ -72,6 +101,60 @@ async def list_platforms():
     """列出所有已注册的平台。"""
     platforms = PlatformRegistry.list_platforms()
     return {"success": True, "data": platforms}
+
+
+@router.get("/all-platforms")
+async def list_all_platforms():
+    """列出所有支持的平台（含未配置），标注 configured 状态。"""
+    registered = {p["platform"] for p in PlatformRegistry.list_platforms()}
+    result = []
+    for p in ALL_PLATFORMS:
+        result.append({
+            **p,
+            "configured": p["platform"] in registered,
+        })
+    return {"success": True, "data": result}
+
+
+@router.post("/connect/{platform}")
+async def connect_platform(platform: str, request: Request):
+    """
+    发起 OAuth 连接（JSON 模式，用于弹窗流程）。
+
+    返回 {auth_url, state} 而非 302 重定向，前端用 window.open() 打开。
+    """
+    service = PlatformRegistry.get(platform)
+    if not service:
+        return JSONResponse(
+            status_code=404,
+            content={"success": False, "detail": f"平台 '{platform}' 未注册或不支持"},
+        )
+
+    state = _create_oauth_state(platform)
+    try:
+        auth_url = await service.get_auth_url(state=state)
+    except PlatformError as e:
+        _validate_oauth_state(state)
+        logger.error("生成授权 URL 失败: platform=%s, error=%s", platform, e)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "detail": f"生成授权 URL 失败: {e}"},
+        )
+
+    return {"success": True, "auth_url": auth_url, "state": state}
+
+
+@router.get("/connect-status/{state}")
+async def connect_status(state: str):
+    """
+    轮询 OAuth 连接完成状态。
+
+    前端在弹窗打开后每 2 秒调用一次，检查 OAuth 回调是否已完成。
+    """
+    completion = _oauth_completions.get(state)
+    if completion is None:
+        return {"success": True, "completed": False}
+    return {"success": True, "completed": True, **completion}
 
 
 @router.get("/authorize/{platform}")
@@ -120,10 +203,13 @@ async def callback(
     if error or not code or not state:
         reason = error or "missing_params"
         logger.warning("OAuth 授权被拒绝或参数缺失: platform=%s, error=%s", platform, reason)
+        raw_state = state
         if state:
             _validate_oauth_state(state)  # 消费 state，防止重放和内存泄漏
-        from urllib.parse import quote
-        return RedirectResponse(url=f"/platform-accounts?oauth=denied&reason={quote(reason, safe='')}", status_code=302)
+        # 如果有 state，写入完成缓存让轮询端点能感知到失败
+        if raw_state:
+            _oauth_completions[raw_state] = {"status": "denied", "platform": platform, "reason": reason}
+        return _build_callback_response(success=False, platform=platform, reason=reason)
 
     # 1. 验证 state
     state_data = _validate_oauth_state(state)
@@ -192,8 +278,56 @@ async def callback(
         platform, account_info.platform_uid, account_info.nickname,
     )
 
-    # 6. 重定向到前端账号管理页
-    return RedirectResponse(url="/platform-accounts?oauth=success", status_code=302)
+    # 6. 写入完成缓存 + 返回弹窗关闭页面
+    _oauth_completions[state] = {
+        "status": "success",
+        "platform": platform,
+        "account_id": account_id,
+        "nickname": account_info.nickname,
+        "avatar_url": account_info.avatar_url or "",
+    }
+    return _build_callback_response(success=True, platform=platform)
+
+
+def _build_callback_response(*, success: bool, platform: str, reason: str = "") -> HTMLResponse:
+    """构建 OAuth 回调响应：弹窗模式返回自动关闭 HTML，否则重定向。"""
+    if success:
+        title = "授权成功"
+        message = f"{_PLATFORM_LOOKUP.get(platform, {}).get('label', platform)} 账号绑定成功！"
+        color = "#16a34a"
+    else:
+        title = "授权失败"
+        message = f"授权被拒绝: {reason}" if reason else "授权失败"
+        color = "#dc2626"
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{title}</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; display: flex; align-items: center;
+         justify-content: center; height: 100vh; margin: 0; background: #fafafa; }}
+  .card {{ text-align: center; padding: 40px; border-radius: 16px;
+           background: white; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }}
+  .icon {{ font-size: 48px; margin-bottom: 16px; }}
+  .msg {{ color: {color}; font-size: 16px; font-weight: 500; }}
+  .sub {{ color: #888; font-size: 13px; margin-top: 8px; }}
+</style></head>
+<body><div class="card">
+  <div class="icon">{"✓" if success else "✗"}</div>
+  <div class="msg">{message}</div>
+  <div class="sub">此窗口将自动关闭...</div>
+</div>
+<script>
+  // 通知父窗口（如果存在）
+  if (window.opener) {{
+    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {'true' if success else 'false'}, platform: '{platform}'}}, '*'); }} catch(e) {{}}
+  }}
+  // 2 秒后自动关闭弹窗
+  setTimeout(function() {{
+    if (window.opener) {{ window.close(); }}
+    else {{ window.location.href = '/platform-accounts?oauth={'success' if success else 'denied'}'; }}
+  }}, 2000);
+</script></body></html>"""
+    return HTMLResponse(content=html)
 
 
 @router.get("/accounts")
