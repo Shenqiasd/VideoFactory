@@ -351,4 +351,13 @@ class TwitterService(PlatformService):
                 )
             processing_info = status_resp.json().get("processing_info", {})
 
+        # Final check for the last poll result
+        state = processing_info.get("state", "")
+        if state == "succeeded":
+            return
+        if state == "failed":
+            error = processing_info.get("error", {})
+            raise PublishError(
+                f"Twitter media processing failed: {error.get('message', 'unknown')}"
+            )
         raise PublishError("Twitter media processing timed out")
