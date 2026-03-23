@@ -67,8 +67,9 @@ class PublishQueue:
         scheduled_at = task_data.get("scheduled_at")
         if scheduled_at:
             try:
-                scheduled_dt = datetime.fromisoformat(scheduled_at)
-                if scheduled_dt > datetime.now():
+                scheduled_dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+                now_dt = datetime.now(scheduled_dt.tzinfo) if scheduled_dt.tzinfo else datetime.now()
+                if scheduled_dt > now_dt:
                     task_data["status"] = PublishStatus.SCHEDULED.value
                     self.db.insert_publish_task_v2(task_data)
                     logger.info("任务已加入定时队列: %s (scheduled_at=%s)", task_id, scheduled_at)
@@ -224,11 +225,17 @@ class PublishQueue:
         while self._running:
             try:
                 await asyncio.sleep(SCHEDULE_CHECK_INTERVAL)
-                now = datetime.now().isoformat()
                 scheduled = self.db.get_publish_tasks_v2(status=PublishStatus.SCHEDULED.value)
                 for task in scheduled:
                     scheduled_at = task.get("scheduled_at")
-                    if scheduled_at and scheduled_at <= now:
+                    if not scheduled_at:
+                        continue
+                    try:
+                        sched_dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+                        now_dt = datetime.now(sched_dt.tzinfo) if sched_dt.tzinfo else datetime.now()
+                    except (ValueError, TypeError):
+                        continue
+                    if sched_dt <= now_dt:
                         self.db.update_publish_task_v2(
                             task["id"], status=PublishStatus.PENDING.value,
                         )
