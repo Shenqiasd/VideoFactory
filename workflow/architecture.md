@@ -119,7 +119,7 @@
   - `POST /api/publish/v2/batch` — 批量创建发布任务，接受多个 `CreatePublishRequest`
 - 性能索引：
   - `idx_publish_tasks_v2_platform_status` — `publish_tasks_v2(platform, status)` 复合索引
-  - `idx_publish_tasks_v2_published` — `publish_tasks_v2(status, published_at)` 部分索引（WHERE status = 'published'）
+  - `idx_publish_tasks_v2_published` — `publish_tasks_v2(status, published_at)` 复合索引
   - `idx_platform_accounts_status` — `platform_accounts(platform, status)` 复合索引
 - 依赖：`cachetools>=5.3.0`
 
