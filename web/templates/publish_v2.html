@@ -1,0 +1,508 @@
+{% extends "base.html" %}
+
+{% block title %}多平台发布 - 视频工厂{% endblock %}
+{% block nav_publish_v2 %}active{% endblock %}
+
+{% block content %}
+<div x-data="publishManager()" x-init="init()">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-[22px] font-semibold text-fg-strong">多平台发布</h1>
+            <p class="text-[13px] text-fg-sub mt-1">创建和管理跨平台视频发布任务</p>
+        </div>
+        <button @click="showCreateForm = !showCreateForm"
+                class="flex items-center gap-2 px-4 py-2 bg-fg-strong text-white rounded-xl text-[13px] font-medium hover:bg-black transition-colors">
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            新建发布
+        </button>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        <template x-for="(item, idx) in statsCards" :key="idx">
+            <div class="bg-white border border-border rounded-2xl px-4 py-3">
+                <div class="text-[11px] text-fg-sub mb-1" x-text="item.label"></div>
+                <div class="text-[18px] font-semibold text-fg-strong" x-text="item.value"></div>
+            </div>
+        </template>
+    </div>
+
+    <!-- Create Form -->
+    <div x-show="showCreateForm" x-transition class="bg-white border border-border rounded-2xl p-6 mb-6">
+        <h2 class="text-[15px] font-semibold text-fg-strong mb-4">创建发布任务</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Video Path -->
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1">视频路径</label>
+                <input type="text" x-model="form.video_path"
+                       placeholder="/path/to/video.mp4"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <!-- Cover Path -->
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1">封面路径（可选）</label>
+                <input type="text" x-model="form.cover_path"
+                       placeholder="/path/to/cover.jpg"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <!-- Title -->
+            <div class="md:col-span-2">
+                <label class="block text-[12px] text-fg-sub mb-1">标题</label>
+                <input type="text" x-model="form.title"
+                       placeholder="视频标题"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <!-- Description -->
+            <div class="md:col-span-2">
+                <label class="block text-[12px] text-fg-sub mb-1">描述</label>
+                <textarea x-model="form.description" rows="3"
+                          placeholder="视频描述"
+                          class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint resize-none"></textarea>
+            </div>
+            <!-- Tags -->
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1">标签（逗号分隔）</label>
+                <input type="text" x-model="form.tags_raw"
+                       placeholder="标签1, 标签2, 标签3"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <!-- Scheduled At -->
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1">定时发布（可选）</label>
+                <input type="datetime-local" x-model="form.scheduled_at"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <!-- Platform Selection -->
+            <div class="md:col-span-2">
+                <label class="block text-[12px] text-fg-sub mb-2">发布平台</label>
+                <div class="space-y-3">
+                    <template x-for="(target, idx) in form.platforms" :key="idx">
+                        <div class="flex items-center gap-3 p-3 bg-muted rounded-xl">
+                            <select x-model="target.platform"
+                                    @change="loadAccountsForPlatform(target)"
+                                    class="px-3 py-1.5 border border-border rounded-lg text-[13px] bg-white focus:outline-none">
+                                <option value="">选择平台</option>
+                                <template x-for="p in availablePlatforms" :key="p.platform">
+                                    <option :value="p.platform" x-text="platformLabels[p.platform] || p.platform"></option>
+                                </template>
+                            </select>
+                            <select x-model="target.account_id"
+                                    class="flex-1 px-3 py-1.5 border border-border rounded-lg text-[13px] bg-white focus:outline-none">
+                                <option value="">选择账号</option>
+                                <template x-for="acc in target._accounts || []" :key="acc.id">
+                                    <option :value="acc.id" x-text="acc.nickname || acc.username || acc.id"></option>
+                                </template>
+                            </select>
+                            <button @click="form.platforms.splice(idx, 1)" x-show="form.platforms.length > 1"
+                                    class="p-1 text-fg-sub hover:text-red-500 transition-colors">
+                                <i data-lucide="x" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+                <button @click="form.platforms.push({platform: '', account_id: '', platform_options: {}, _accounts: []})"
+                        class="mt-2 text-[12px] text-fg-sub hover:text-fg-strong transition-colors flex items-center gap-1">
+                    <i data-lucide="plus" class="w-3 h-3"></i> 添加平台
+                </button>
+            </div>
+        </div>
+        <!-- Submit -->
+        <div class="flex justify-end gap-3 mt-6">
+            <button @click="showCreateForm = false"
+                    class="px-4 py-2 text-[13px] text-fg-sub hover:text-fg-strong transition-colors">
+                取消
+            </button>
+            <button @click="submitCreate()" :disabled="submitting"
+                    class="px-5 py-2 bg-fg-strong text-white rounded-xl text-[13px] font-medium hover:bg-black transition-colors disabled:opacity-50">
+                <span x-show="!submitting">提交</span>
+                <span x-show="submitting">提交中...</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+        <select x-model="filter.status" @change="fetchTasks()"
+                class="px-3 py-1.5 border border-border rounded-xl text-[13px] bg-white focus:outline-none">
+            <option value="">全部状态</option>
+            <option value="pending">待发布</option>
+            <option value="publishing">发布中</option>
+            <option value="published">已发布</option>
+            <option value="failed">失败</option>
+            <option value="scheduled">已调度</option>
+            <option value="cancelled">已取消</option>
+        </select>
+        <select x-model="filter.platform" @change="fetchTasks()"
+                class="px-3 py-1.5 border border-border rounded-xl text-[13px] bg-white focus:outline-none">
+            <option value="">全部平台</option>
+            <template x-for="p in availablePlatforms" :key="p.platform">
+                <option :value="p.platform" x-text="platformLabels[p.platform] || p.platform"></option>
+            </template>
+        </select>
+    </div>
+
+    <!-- Task Table -->
+    <div class="bg-white border border-border rounded-2xl overflow-hidden">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-border text-[12px] text-fg-sub">
+                    <th class="text-left px-4 py-3 font-medium">平台</th>
+                    <th class="text-left px-4 py-3 font-medium">标题</th>
+                    <th class="text-left px-4 py-3 font-medium">状态</th>
+                    <th class="text-left px-4 py-3 font-medium">账号</th>
+                    <th class="text-left px-4 py-3 font-medium">创建时间</th>
+                    <th class="text-right px-4 py-3 font-medium">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="task in tasks" :key="task.id">
+                    <tr class="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
+                        <td class="px-4 py-3">
+                            <span class="inline-flex items-center gap-1.5 text-[13px]">
+                                <i :data-lucide="platformIcons[task.platform] || 'globe'" class="w-4 h-4"></i>
+                                <span x-text="platformLabels[task.platform] || task.platform"></span>
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-[13px] text-fg-strong max-w-[240px] truncate" x-text="task.title"></td>
+                        <td class="px-4 py-3">
+                            <span class="inline-block px-2.5 py-1 rounded-full text-[11px] font-medium"
+                                  :class="statusBadge(task.status)">
+                                <span x-text="statusLabel(task.status)"></span>
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-[13px] text-fg-sub" x-text="task.account_id.substring(0, 8) + '...'"></td>
+                        <td class="px-4 py-3 text-[13px] text-fg-sub" x-text="formatTime(task.created_at)"></td>
+                        <td class="px-4 py-3 text-right">
+                            <div class="flex items-center justify-end gap-1">
+                                <!-- Retry button (failed only) -->
+                                <button x-show="task.status === 'failed'"
+                                        @click="retryTask(task.id)"
+                                        class="p-1.5 rounded-lg hover:bg-muted text-fg-sub hover:text-fg-strong transition-colors"
+                                        title="重试">
+                                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                </button>
+                                <!-- Cancel button (pending/scheduled) -->
+                                <button x-show="task.status === 'pending' || task.status === 'scheduled'"
+                                        @click="cancelTask(task.id)"
+                                        class="p-1.5 rounded-lg hover:bg-muted text-fg-sub hover:text-red-500 transition-colors"
+                                        title="取消">
+                                    <i data-lucide="x-circle" class="w-3.5 h-3.5"></i>
+                                </button>
+                                <!-- View link (published only) -->
+                                <a x-show="task.status === 'published' && task.permalink"
+                                   :href="task.permalink" target="_blank"
+                                   class="p-1.5 rounded-lg hover:bg-muted text-fg-sub hover:text-fg-strong transition-colors"
+                                   title="查看">
+                                    <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                                </a>
+                                <!-- Delete button (failed/cancelled/published) -->
+                                <button x-show="task.status === 'failed' || task.status === 'cancelled' || task.status === 'published'"
+                                        @click="deleteTask(task.id)"
+                                        class="p-1.5 rounded-lg hover:bg-muted text-fg-sub hover:text-red-500 transition-colors"
+                                        title="删除">
+                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+                <tr x-show="tasks.length === 0">
+                    <td colspan="6" class="px-4 py-12 text-center text-[13px] text-fg-sub">
+                        暂无发布任务
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="flex items-center justify-between mt-4" x-show="totalTasks > filter.limit">
+        <span class="text-[12px] text-fg-sub">
+            共 <span x-text="totalTasks"></span> 条任务
+        </span>
+        <div class="flex gap-2">
+            <button @click="filter.offset = Math.max(0, filter.offset - filter.limit); fetchTasks()"
+                    :disabled="filter.offset === 0"
+                    class="px-3 py-1.5 border border-border rounded-lg text-[12px] hover:bg-muted disabled:opacity-40 transition-colors">
+                上一页
+            </button>
+            <button @click="filter.offset += filter.limit; fetchTasks()"
+                    :disabled="filter.offset + filter.limit >= totalTasks"
+                    class="px-3 py-1.5 border border-border rounded-lg text-[12px] hover:bg-muted disabled:opacity-40 transition-colors">
+                下一页
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function publishManager() {
+    return {
+        showCreateForm: false,
+        submitting: false,
+        tasks: [],
+        totalTasks: 0,
+        stats: {},
+        availablePlatforms: [],
+        filter: {
+            status: '',
+            platform: '',
+            limit: 50,
+            offset: 0,
+        },
+        form: {
+            video_path: '',
+            title: '',
+            description: '',
+            tags_raw: '',
+            cover_path: '',
+            scheduled_at: '',
+            platforms: [{ platform: '', account_id: '', platform_options: {}, _accounts: [] }],
+        },
+        platformLabels: {
+            youtube: 'YouTube',
+            bilibili: 'Bilibili',
+            tiktok: 'TikTok',
+            douyin: '抖音',
+            facebook: 'Facebook',
+            instagram: 'Instagram',
+            twitter: 'Twitter/X',
+            xiaohongshu: '小红书',
+            weixin_sph: '微信视频号',
+            weixin_gzh: '微信公众号',
+            kwai: '快手',
+            linkedin: 'LinkedIn',
+            pinterest: 'Pinterest',
+            threads: 'Threads',
+        },
+        platformIcons: {
+            youtube: 'youtube',
+            bilibili: 'tv-2',
+            tiktok: 'music',
+            douyin: 'music-2',
+            facebook: 'facebook',
+            instagram: 'instagram',
+            twitter: 'twitter',
+            xiaohongshu: 'book-open',
+            weixin_sph: 'video',
+            weixin_gzh: 'message-circle',
+            kwai: 'film',
+            linkedin: 'linkedin',
+            pinterest: 'image',
+            threads: 'at-sign',
+        },
+
+        get statsCards() {
+            return [
+                { label: '总任务', value: this.stats.total || 0 },
+                { label: '待发布', value: this.stats.pending || 0 },
+                { label: '发布中', value: this.stats.publishing || 0 },
+                { label: '已发布', value: this.stats.published || 0 },
+                { label: '失败', value: this.stats.failed || 0 },
+                { label: '已调度', value: this.stats.scheduled || 0 },
+            ];
+        },
+
+        async init() {
+            await this.fetchPlatforms();
+            await this.fetchStats();
+            await this.fetchTasks();
+            // Auto-refresh every 5s
+            setInterval(() => {
+                this.fetchTasks();
+                this.fetchStats();
+            }, 5000);
+        },
+
+        async fetchPlatforms() {
+            try {
+                const resp = await fetch('/api/oauth/platforms');
+                const data = await resp.json();
+                if (data.success) this.availablePlatforms = data.data;
+            } catch (_) {}
+        },
+
+        async fetchStats() {
+            try {
+                const resp = await fetch('/api/publish/v2/stats');
+                const data = await resp.json();
+                if (data.success) this.stats = data.data;
+            } catch (_) {}
+        },
+
+        async fetchTasks() {
+            try {
+                const params = new URLSearchParams();
+                if (this.filter.status) params.set('status', this.filter.status);
+                if (this.filter.platform) params.set('platform', this.filter.platform);
+                params.set('limit', this.filter.limit);
+                params.set('offset', this.filter.offset);
+                const resp = await fetch('/api/publish/v2/tasks?' + params);
+                const data = await resp.json();
+                if (data.success) {
+                    this.tasks = data.data.tasks;
+                    this.totalTasks = data.data.total;
+                }
+            } catch (_) {}
+            this.$nextTick(() => safeCreateIcons());
+        },
+
+        async loadAccountsForPlatform(target) {
+            if (!target.platform) { target._accounts = []; return; }
+            try {
+                const resp = await fetch('/api/oauth/accounts?platform=' + target.platform);
+                const data = await resp.json();
+                if (data.success) target._accounts = data.data;
+            } catch (_) { target._accounts = []; }
+        },
+
+        async submitCreate() {
+            if (!this.form.title || !this.form.video_path) {
+                showToast('请填写标题和视频路径', 'error');
+                return;
+            }
+            const validPlatforms = this.form.platforms.filter(p => p.platform && p.account_id);
+            if (validPlatforms.length === 0) {
+                showToast('请至少选择一个平台和账号', 'error');
+                return;
+            }
+            this.submitting = true;
+            try {
+                const tags = this.form.tags_raw
+                    ? this.form.tags_raw.split(',').map(t => t.trim()).filter(Boolean)
+                    : [];
+                const body = {
+                    video_path: this.form.video_path,
+                    title: this.form.title,
+                    description: this.form.description,
+                    tags: tags,
+                    cover_path: this.form.cover_path,
+                    platforms: validPlatforms.map(p => ({
+                        platform: p.platform,
+                        account_id: p.account_id,
+                        platform_options: p.platform_options || {},
+                    })),
+                    scheduled_at: this.form.scheduled_at || null,
+                };
+                const resp = await fetch('/api/publish/v2/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast('发布任务已创建', 'success');
+                    this.showCreateForm = false;
+                    this.resetForm();
+                    await this.fetchTasks();
+                    await this.fetchStats();
+                } else {
+                    showToast(data.detail || '创建失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败: ' + e.message, 'error');
+            } finally {
+                this.submitting = false;
+            }
+        },
+
+        resetForm() {
+            this.form = {
+                video_path: '',
+                title: '',
+                description: '',
+                tags_raw: '',
+                cover_path: '',
+                scheduled_at: '',
+                platforms: [{ platform: '', account_id: '', platform_options: {}, _accounts: [] }],
+            };
+        },
+
+        async retryTask(taskId) {
+            try {
+                const resp = await fetch('/api/publish/v2/tasks/' + taskId + '/retry', { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast('任务已重新入队', 'success');
+                    await this.fetchTasks();
+                    await this.fetchStats();
+                } else {
+                    showToast(data.detail || '重试失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败', 'error');
+            }
+        },
+
+        async cancelTask(taskId) {
+            try {
+                const resp = await fetch('/api/publish/v2/tasks/' + taskId, { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast('任务已取消', 'success');
+                    await this.fetchTasks();
+                    await this.fetchStats();
+                } else {
+                    showToast(data.detail || '取消失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败', 'error');
+            }
+        },
+
+        async deleteTask(taskId) {
+            if (!confirm('确定删除此任务？')) return;
+            try {
+                const resp = await fetch('/api/publish/v2/tasks/' + taskId, { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast('任务已删除', 'success');
+                    await this.fetchTasks();
+                    await this.fetchStats();
+                } else {
+                    showToast(data.detail || '删除失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败', 'error');
+            }
+        },
+
+        statusBadge(status) {
+            const map = {
+                pending: 'bg-yellow-50 text-yellow-700 border border-yellow-200',
+                publishing: 'bg-blue-50 text-blue-700 border border-blue-200 animate-pulse',
+                published: 'bg-green-50 text-green-700 border border-green-200',
+                failed: 'bg-red-50 text-red-700 border border-red-200',
+                scheduled: 'bg-purple-50 text-purple-700 border border-purple-200',
+                cancelled: 'bg-gray-50 text-gray-500 border border-gray-200',
+            };
+            return map[status] || 'bg-gray-50 text-gray-500';
+        },
+
+        statusLabel(status) {
+            const map = {
+                pending: '待发布',
+                publishing: '发布中',
+                published: '已发布',
+                failed: '失败',
+                scheduled: '已调度',
+                cancelled: '已取消',
+            };
+            return map[status] || status;
+        },
+
+        formatTime(isoStr) {
+            if (!isoStr) return '-';
+            try {
+                const d = new Date(isoStr);
+                return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            } catch (_) { return isoStr; }
+        },
+    };
+}
+</script>
+{% endblock %}

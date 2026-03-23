@@ -41,6 +41,7 @@ from api.routes.publish import router as publish_router
 from api.routes.storage import router as storage_router
 from api.routes.monitor import router as monitor_router
 from api.routes.oauth import router as oauth_router
+from api.routes.publish_v2 import router as publish_v2_router, set_publish_queue
 from core.scheduler import StorageCleanupScheduler
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,25 @@ async def lifespan(app: FastAPI):
         PlatformRegistry.register(bili_service)
         logger.info("Bilibili 平台服务已注册")
 
+    # 初始化发布队列
+    from core.database import Database
+    from platform_services.token_manager import TokenManager
+    from platform_services.publish_queue import PublishQueue
+
+    db = Database()
+    token_manager = TokenManager(db)
+    publish_queue = PublishQueue(db=db, token_manager=token_manager)
+    set_publish_queue(publish_queue)
+    await publish_queue.start()
+    app.state.publish_queue = publish_queue
+    logger.info("📤 发布队列已启动")
+
     yield
+
+    # 关闭发布队列
+    pq = getattr(app.state, "publish_queue", None)
+    if pq:
+        await pq.stop()
 
     # 关闭
     scheduler = getattr(app.state, "storage_cleanup_scheduler", None)
@@ -242,6 +261,7 @@ app.include_router(system_router, prefix="/api/system", tags=["系统"])
 app.include_router(storage_router, prefix="/api", tags=["存储管理"])
 app.include_router(monitor_router, prefix="/api/monitor", tags=["频道监控"])
 app.include_router(oauth_router, prefix="/api/oauth", tags=["平台OAuth"])
+app.include_router(publish_v2_router, prefix="/api/publish/v2", tags=["多平台发布V2"])
 
 
 @app.get("/api")
