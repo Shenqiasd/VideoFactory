@@ -40,6 +40,8 @@ from api.routes.pages import router as pages_router
 from api.routes.publish import router as publish_router
 from api.routes.storage import router as storage_router
 from api.routes.monitor import router as monitor_router
+from api.routes.oauth import router as oauth_router
+from api.routes.publish_v2 import router as publish_v2_router
 from core.scheduler import StorageCleanupScheduler
 
 logger = logging.getLogger(__name__)
@@ -53,14 +55,33 @@ async def lifespan(app: FastAPI):
 
     # 初始化全局资源
     from core.config import Config
+    from core.database import Database
+    from platform_services.token_manager import TokenManager
+    from platform_services.registry import PlatformRegistry
+    from platform_services.publish_queue import PublishQueue
+
     config = Config()
     logger.info(f"📋 配置加载完成")
     cleanup_scheduler = StorageCleanupScheduler()
     cleanup_scheduler.start()
     app.state.storage_cleanup_scheduler = cleanup_scheduler
 
+    # 初始化发布队列
+    db = Database()
+    token_manager = TokenManager(db)
+    publish_queue = PublishQueue(db, token_manager, PlatformRegistry)
+    app.state.publish_db = db
+    app.state.token_manager = token_manager
+    app.state.publish_queue = publish_queue
+    await publish_queue.start()
+    logger.info("📤 发布队列已启动")
+
     yield
 
+    # 关闭发布队列
+    pq = getattr(app.state, "publish_queue", None)
+    if pq:
+        await pq.stop()
     # 关闭
     scheduler = getattr(app.state, "storage_cleanup_scheduler", None)
     if scheduler:
@@ -211,6 +232,8 @@ app.include_router(publish_router, prefix="/api/publish", tags=["发布账号"])
 app.include_router(system_router, prefix="/api/system", tags=["系统"])
 app.include_router(storage_router, prefix="/api", tags=["存储管理"])
 app.include_router(monitor_router, prefix="/api/monitor", tags=["频道监控"])
+app.include_router(oauth_router, prefix="/api/oauth", tags=["平台OAuth"])
+app.include_router(publish_v2_router, prefix="/api/publish/v2", tags=["多平台发布V2"])
 
 
 @app.get("/api")

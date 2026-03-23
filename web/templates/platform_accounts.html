@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}平台账号 - 视频工厂{% endblock %}
+{% block nav_platform_accounts %}active{% endblock %}
+
+{% block content %}
+<div x-data="platformAccounts()" x-init="init()">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-[22px] font-semibold text-fg-strong">平台账号</h1>
+            <p class="text-[13px] text-fg-sub mt-1">管理已绑定的社交媒体平台账号，通过 OAuth 授权安全登录</p>
+        </div>
+    </div>
+
+    <!-- Bind New Account -->
+    <div class="mb-8">
+        <h2 class="text-[15px] font-medium text-fg-strong mb-4">绑定新账号</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <template x-for="p in platforms" :key="p.platform">
+                <a :href="'/api/oauth/authorize/' + p.platform"
+                   class="flex flex-col items-center gap-2 p-4 rounded-2xl border border-border hover:shadow-card transition-all cursor-pointer group">
+                    <div class="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-fg group-hover:text-fg-strong transition-colors">
+                        <i :data-lucide="platformIcon(p.platform)" class="w-5 h-5"></i>
+                    </div>
+                    <span class="text-[12px] text-fg-sub group-hover:text-fg-strong transition-colors" x-text="platformLabel(p.platform)"></span>
+                </a>
+            </template>
+            <div x-show="platforms.length === 0" class="col-span-full text-center py-8 text-fg-sub text-[13px]">
+                暂无已注册的平台服务，请等待管理员配置
+            </div>
+        </div>
+    </div>
+
+    <!-- OAuth Success Toast -->
+    <template x-if="oauthSuccess">
+        <div class="mb-6 px-4 py-3 rounded-2xl border border-green-200 bg-green-50 text-green-700 text-[13px]">
+            账号绑定成功！
+        </div>
+    </template>
+
+    <!-- Bound Accounts -->
+    <div>
+        <h2 class="text-[15px] font-medium text-fg-strong mb-4">
+            已绑定账号
+            <span class="text-fg-sub font-normal" x-text="'(' + accounts.length + ')'"></span>
+        </h2>
+
+        <!-- Loading -->
+        <div x-show="loading" class="text-center py-12 text-fg-sub text-[13px]">加载中...</div>
+
+        <!-- Empty -->
+        <div x-show="!loading && accounts.length === 0" class="text-center py-12">
+            <div class="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-3">
+                <i data-lucide="link" class="w-6 h-6 text-fg-faint"></i>
+            </div>
+            <p class="text-fg-sub text-[13px]">还没有绑定任何平台账号</p>
+            <p class="text-fg-faint text-[12px] mt-1">点击上方平台图标开始绑定</p>
+        </div>
+
+        <!-- Account Cards -->
+        <div x-show="!loading && accounts.length > 0" class="space-y-3">
+            <template x-for="acc in accounts" :key="acc.id">
+                <div class="flex items-center gap-4 p-4 rounded-2xl border border-border hover:shadow-card transition-all">
+                    <!-- Avatar -->
+                    <div class="w-10 h-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        <template x-if="acc.avatar_url">
+                            <img :src="acc.avatar_url" class="w-full h-full object-cover" :alt="acc.nickname">
+                        </template>
+                        <template x-if="!acc.avatar_url">
+                            <span class="text-[14px] font-medium text-fg" x-text="(acc.nickname || '?')[0].toUpperCase()"></span>
+                        </template>
+                    </div>
+
+                    <!-- Info -->
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[14px] font-medium text-fg-strong truncate" x-text="acc.nickname"></span>
+                            <span class="px-2 py-0.5 rounded-lg text-[11px] bg-muted text-fg-sub" x-text="platformLabel(acc.platform)"></span>
+                            <span class="px-2 py-0.5 rounded-lg text-[11px]"
+                                  :class="acc.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'"
+                                  x-text="acc.status === 'active' ? '正常' : '异常'"></span>
+                        </div>
+                        <div class="text-[12px] text-fg-faint mt-0.5">
+                            <span x-text="'@' + (acc.username || acc.platform_uid)"></span>
+                            <span class="mx-1">·</span>
+                            <span x-text="'绑定于 ' + formatDate(acc.created_at)"></span>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <button @click="unbindAccount(acc.id, acc.nickname)"
+                            class="px-3 py-1.5 rounded-xl text-[12px] text-red-500 hover:bg-red-50 transition-colors flex-shrink-0">
+                        解绑
+                    </button>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function platformAccounts() {
+    return {
+        platforms: [],
+        accounts: [],
+        loading: true,
+        oauthSuccess: new URLSearchParams(window.location.search).get('oauth') === 'success',
+
+        async init() {
+            await Promise.all([this.loadPlatforms(), this.loadAccounts()]);
+            this.loading = false;
+            this.$nextTick(() => safeCreateIcons());
+        },
+
+        async loadPlatforms() {
+            try {
+                const resp = await fetch('/api/oauth/platforms');
+                const data = await resp.json();
+                this.platforms = data.data || [];
+            } catch (e) {
+                console.error('Failed to load platforms', e);
+            }
+        },
+
+        async loadAccounts() {
+            try {
+                const resp = await fetch('/api/oauth/accounts');
+                const data = await resp.json();
+                this.accounts = data.data || [];
+            } catch (e) {
+                console.error('Failed to load accounts', e);
+            }
+        },
+
+        async unbindAccount(id, name) {
+            if (!confirm(`确定要解绑账号「${name}」吗？解绑后需要重新授权。`)) return;
+            try {
+                const resp = await fetch(`/api/oauth/accounts/${id}`, { method: 'DELETE' });
+                if (resp.ok) {
+                    this.accounts = this.accounts.filter(a => a.id !== id);
+                    showToast('账号已解绑', 'success');
+                } else {
+                    showToast('解绑失败', 'error');
+                }
+            } catch (e) {
+                showToast('解绑失败', 'error');
+            }
+        },
+
+        platformIcon(p) {
+            const icons = {
+                youtube: 'youtube', bilibili: 'tv', tiktok: 'music',
+                douyin: 'music-2', facebook: 'facebook', instagram: 'instagram',
+                twitter: 'twitter', pinterest: 'image', linkedin: 'linkedin',
+                kwai: 'video', xiaohongshu: 'book-open', weixin_sph: 'message-circle',
+                weixin_gzh: 'newspaper', threads: 'at-sign',
+            };
+            return icons[p] || 'globe';
+        },
+
+        platformLabel(p) {
+            const labels = {
+                youtube: 'YouTube', bilibili: 'Bilibili', tiktok: 'TikTok',
+                douyin: '抖音', facebook: 'Facebook', instagram: 'Instagram',
+                twitter: 'X (Twitter)', pinterest: 'Pinterest', linkedin: 'LinkedIn',
+                kwai: '快手', xiaohongshu: '小红书', weixin_sph: '微信视频号',
+                weixin_gzh: '微信公众号', threads: 'Threads',
+            };
+            return labels[p] || p;
+        },
+
+        formatDate(dateStr) {
+            if (!dateStr) return '未知';
+            try {
+                return new Date(dateStr).toLocaleDateString('zh-CN');
+            } catch (e) {
+                return dateStr;
+            }
+        },
+    };
+}
+</script>
+{% endblock %}
