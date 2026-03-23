@@ -320,6 +320,8 @@ class TestRefreshToken:
             new_cred = await instagram_service.refresh_token(valid_credential)
 
         assert new_cred.access_token == "ig_refreshed_token"
+        # refresh_token should also be updated to the new token (not stale old one)
+        assert new_cred.refresh_token == "ig_refreshed_token"
         assert new_cred.expires_at > int(time.time())
         # raw should be preserved (not overwritten with token exchange response)
         assert new_cred.raw == valid_credential.raw

@@ -139,7 +139,7 @@ class MetaBaseService(PlatformService):
 
         return OAuthCredential(
             access_token=new_token,
-            refresh_token=credential.refresh_token,
+            refresh_token=new_token,
             expires_at=int(time.time()) + expires_in,
             raw=credential.raw,
         )
