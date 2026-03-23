@@ -490,8 +490,9 @@ class Database:
             return self._deserialize_account(dict(row)) if row else None
 
     def delete_account(self, account_id: str):
-        """删除账号"""
+        """删除账号（同时清理关联的 publish_tasks）"""
         with self._lock:
+            self.conn.execute("DELETE FROM publish_tasks WHERE account_id = ?", (account_id,))
             self.conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
             self.conn.commit()
 
