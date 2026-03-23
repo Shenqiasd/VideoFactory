@@ -34,7 +34,7 @@ USERINFO_URI = "https://api.linkedin.com/v2/userinfo"
 REGISTER_UPLOAD_URI = "https://api.linkedin.com/v2/assets?action=registerUpload"
 UGC_POST_URI = "https://api.linkedin.com/v2/ugcPosts"
 
-SCOPES = "w_member_social r_liteprofile"
+SCOPES = "openid profile email w_member_social"
 
 
 class LinkedInService(PlatformService):

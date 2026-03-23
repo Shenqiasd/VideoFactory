@@ -90,7 +90,9 @@ class TestGetAuthUrl:
     async def test_includes_scopes(self, linkedin_service):
         url = await linkedin_service.get_auth_url(state="s")
         assert "w_member_social" in url
-        assert "r_liteprofile" in url
+        assert "openid" in url
+        assert "profile" in url
+        assert "email" in url
 
     @pytest.mark.asyncio
     async def test_includes_redirect_uri(self, linkedin_service):

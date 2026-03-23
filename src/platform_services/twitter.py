@@ -15,6 +15,7 @@ from typing import List, Optional
 from urllib.parse import urlencode
 
 import httpx
+from cachetools import TTLCache
 
 from .base import (
     AuthMethod,
@@ -42,8 +43,8 @@ SCOPES = "tweet.read tweet.write users.read offline.access"
 
 DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024  # 5 MB
 
-# In-memory store for PKCE code_verifiers keyed by state
-_pkce_store: dict[str, str] = {}
+# In-memory store for PKCE code_verifiers keyed by state (TTL=600s to match oauth_states)
+_pkce_store: TTLCache = TTLCache(maxsize=10000, ttl=600)
 
 
 def _generate_pkce() -> tuple[str, str]:
