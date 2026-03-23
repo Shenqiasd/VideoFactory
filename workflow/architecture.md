@@ -9,9 +9,10 @@
 - `src/creation/`：高光提取、主体检测、智能裁剪、字幕/转场/BGM 组合成片
 - `src/distribute/`：发布器与调度器（含失败重试与重放）
 - `workers/`：编排器主循环 + 调度器并行运行
+- `src/platform_services/`：多平台抽象层 — PlatformService ABC、PlatformRegistry 单例、TokenManager（TTLCache + DB）、OAuth 异常
 - `api/auth.py`：认证模块 — 用户注册/登录、bcrypt 密码哈希、itsdangerous 签名 httpOnly Cookie 会话、Token 脱敏工具
-- `api/routes/`：任务、生产、加工、分发、系统、发布账号、存储、频道监控、Web 页面/partials
-- `web/templates/`：Jinja2 页面 + HTMX partials + 独立登录/注册页
+- `api/routes/`：任务、生产、加工、分发、系统、发布账号、存储、频道监控、OAuth、Web 页面/partials
+- `web/templates/`：Jinja2 页面 + HTMX partials + 独立登录/注册页 + 平台账号管理页
 
 ## 2) 核心任务流
 任务状态机定义在 `src/core/task.py`：
@@ -88,7 +89,27 @@
   - 任务详情页显示账号绑定、发布事件流，以及创作结果/创作审核操作
   - 新建任务页会前置校验平台账号是否可用，并支持创作配置提交
 
-## 5) 认证系统
+## 5) 多平台 OAuth 认证与发布基础设施
+- 平台抽象层：`src/platform_services/base.py` 定义 `PlatformService` ABC，包含 `get_auth_url`、`handle_callback`、`refresh_token`、`check_token_status`、`publish_video` 等抽象方法
+- 枚举与数据类：`PlatformType`（14 个平台）、`AuthMethod`（oauth2/cookie）、`OAuthCredential`、`PlatformAccount`、`PublishResult`
+- 平台注册表：`PlatformRegistry` 单例，支持 register/get/list_platforms
+- Token 管理器：`TokenManager` 使用 `cachetools.TTLCache`（maxsize=1000, ttl=30min）+ SQLite 持久化，token 剩余时间 < 600s 时自动刷新
+- 自定义异常：`PlatformError`、`OAuthError`、`TokenExpiredError`、`PublishError`
+- 新增数据库表：
+  - `platform_accounts`：平台账号（id, user_id, platform, auth_method, platform_uid, username, nickname, avatar_url, status, cookie_path）
+  - `oauth_credentials`：OAuth 凭证（account_id, platform, access_token, refresh_token, expires_at, refresh_expires_at, raw）
+  - `publish_tasks_v2`：发布任务 v2（account_id, platform, title, description, tags, video_path, cover_path, status, scheduled_at, attempts）
+- OAuth 路由（`api/routes/oauth.py`，前缀 `/api/oauth`）：
+  - `GET /platforms` — 已注册平台列表
+  - `GET /authorize/{platform}` — 发起 OAuth 授权（302 重定向）
+  - `GET /callback/{platform}` — 处理 OAuth 回调（支持用户拒绝授权）
+  - `GET /accounts` — 已绑定账号列表
+  - `GET /accounts/{id}` — 账号详情
+  - `DELETE /accounts/{id}` — 解绑账号
+- 前端页面：`/platform-accounts` 平台账号管理（Alpine.js）
+- 依赖：`cachetools>=5.3.0`
+
+## 6) 认证系统
 - 用户存储：`config/users.json`（bcrypt 哈希密码，JSON 文件）
 - 会话管理：`itsdangerous.URLSafeTimedSerializer` 签名的 httpOnly Cookie（`vf_session`，30 天有效期）
 - 密钥持久化：`config/.session_secret`（自动生成，或通过 `VF_SECRET_KEY` 环境变量指定）

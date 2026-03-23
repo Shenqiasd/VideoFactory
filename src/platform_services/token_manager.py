@@ -28,6 +28,10 @@ class TokenManager:
 
     REFRESH_BUFFER_SECONDS = 600  # 过期前 10 分钟触发刷新
 
+    def _needs_refresh(self, credential: OAuthCredential) -> bool:
+        """Check if token needs refresh based on expiry buffer."""
+        return credential.expires_at - time.time() < self.REFRESH_BUFFER_SECONDS
+
     def __init__(self, db):
         self.db = db
         self._cache: TTLCache = TTLCache(maxsize=1000, ttl=1800)
@@ -60,8 +64,8 @@ class TokenManager:
                 raw=db_record.get("raw"),
             )
 
-        # 3. 检查是否需要刷新
-        if not await platform_service.check_token_status(credential):
+        # 3. 检查是否需要刷新（使用 REFRESH_BUFFER_SECONDS 统一判断）
+        if self._needs_refresh(credential):
             if not credential.refresh_token:
                 raise TokenExpiredError(
                     f"Token expired and no refresh_token for account {account_id}"

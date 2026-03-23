@@ -101,13 +101,25 @@ async def authorize(platform: str, request: Request):
 
 
 @router.get("/callback/{platform}")
-async def callback(platform: str, code: str = Query(...), state: str = Query(...)):
+async def callback(
+    platform: str,
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+):
     """
     处理 OAuth 回调。
 
     平台授权后重定向到此端点，后端用 code 换取 token，
     创建/更新平台账号和凭证，然后重定向到前端账号页面。
+    若用户在平台授权页拒绝授权，平台会携带 error 参数回调（无 code）。
     """
+    # 0. 处理用户拒绝授权或缺少必要参数
+    if error or not code or not state:
+        reason = error or "missing_params"
+        logger.warning("OAuth 授权被拒绝或参数缺失: platform=%s, error=%s", platform, reason)
+        return RedirectResponse(url=f"/platform-accounts?oauth=denied&reason={reason}", status_code=302)
+
     # 1. 验证 state
     state_data = _validate_oauth_state(state)
     if not state_data or state_data.get("platform") != platform:
