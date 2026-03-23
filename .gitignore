@@ -26,20 +26,26 @@ venv/
 ENV/
 env/
 
-# IDE
+# IDE & AI tooling
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.claude/settings.local*.json
-.claude/*.local*.json
-.claude/settings.json
-
-# Local collaboration tooling
-FlowPilot/
+.cursorrules
+.claude/
+.agents/
 .flowpilot/
 .workflow/
+.video-factory/
+.local-runtime/
+FlowPilot/
+flow.js
+
+# Backup files
+*.bak
+*.bak2
+*.bak3
 
 # Testing
 .pytest_cache/
@@ -60,7 +66,7 @@ output/
 working/
 downloads/
 
-# Secrets & Config (敏感信息)
+# Secrets & Config
 config/settings.yaml
 config/settings.local.yaml
 config/users.json

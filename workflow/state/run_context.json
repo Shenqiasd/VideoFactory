@@ -1,9 +1,0 @@
-{
-  "project": "video-factory",
-  "repo_root": "/Users/pete/Project/Git/VideoFactory",
-  "api_port": 9000,
-  "worker_entry": "workers/main.py",
-  "service_script": "scripts/start_all.sh",
-  "test_command": "./.venv/bin/python -m pytest -q",
-  "last_baseline_date": "2026-03-09"
-}
