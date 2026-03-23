@@ -207,7 +207,10 @@ async def auth_register(body: _RegisterRequest):
 @app.post("/api/auth/login")
 async def auth_login(body: _LoginRequest):
     if not auth_enabled():
-        return {"success": True, "message": "认证未启用"}
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "detail": "请先注册账户"},
+        )
     username = (body.username or "").strip()
     user = get_user_by_username(username)
     if not user or not verify_password(body.password, user["password_hash"]):

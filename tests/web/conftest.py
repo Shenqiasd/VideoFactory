@@ -19,6 +19,7 @@ def _isolate_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("VF_DB_PATH", str(tmp_path / "video_factory.db"))
     monkeypatch.setenv("VF_DISABLE_TITLE_RESOLVE", "1")
+    monkeypatch.setenv("VF_USERS_FILE", str(tmp_path / "users.json"))
 
     from api.routes import distribute as distribute_routes
     from api.routes import publish as publish_routes
@@ -47,6 +48,21 @@ def app():
 
 @pytest.fixture
 def client(app):
+    """Authenticated test client — registers a test user so pages are accessible."""
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as test_client:
+        # Register a test user so auth is enabled and pages don't redirect
+        test_client.post(
+            "/api/auth/register",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+        yield test_client
+
+
+@pytest.fixture
+def anon_client(app):
+    """Unauthenticated test client — no user registered, no session cookie."""
     from fastapi.testclient import TestClient
 
     with TestClient(app) as test_client:
