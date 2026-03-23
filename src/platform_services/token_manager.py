@@ -102,6 +102,36 @@ class TokenManager:
         """清除缓存中的 token（解绑账号时调用）。"""
         self._cache.pop(account_id, None)
 
+    async def check_all_token_health(self) -> list:
+        """Check all stored credentials and return a list of expiring/expired tokens.
+        Logs warnings for tokens expiring within 7 days."""
+        alerts: list[dict] = []
+        credentials = self.db.get_all_oauth_credentials()
+        for cred in credentials:
+            remaining = cred["expires_at"] - time.time()
+            if remaining < 0:
+                alerts.append({
+                    "account_id": cred["account_id"],
+                    "platform": cred["platform"],
+                    "status": "expired",
+                })
+                logger.warning(
+                    "Token EXPIRED for %s account %s",
+                    cred["platform"], cred["account_id"],
+                )
+            elif remaining < 7 * 86400:  # 7 days
+                alerts.append({
+                    "account_id": cred["account_id"],
+                    "platform": cred["platform"],
+                    "status": "expiring_soon",
+                    "expires_in_hours": int(remaining / 3600),
+                })
+                logger.warning(
+                    "Token expiring soon for %s account %s: %dh remaining",
+                    cred["platform"], cred["account_id"], int(remaining / 3600),
+                )
+        return alerts
+
     def cache_stats(self) -> dict:
         """返回缓存统计信息（调试用）。"""
         return {

@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+
+{% block title %}数据分析 - 视频工厂{% endblock %}
+{% block nav_analytics %}active{% endblock %}
+
+{% block content %}
+<div x-data="analyticsManager()" x-init="init()">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-[22px] font-semibold text-fg-strong">数据分析</h1>
+            <p class="text-[13px] text-fg-sub mt-1">跨平台内容数据统计与分析</p>
+        </div>
+        <button @click="syncData()" :disabled="syncing"
+                class="flex items-center gap-2 px-4 py-2 bg-fg-strong text-white rounded-xl text-[13px] font-medium hover:bg-black transition-colors disabled:opacity-50">
+            <i data-lucide="refresh-cw" class="w-4 h-4" :class="syncing && 'animate-spin'"></i>
+            <span x-text="syncing ? '同步中...' : '同步数据'"></span>
+        </button>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div class="bg-white border border-border rounded-2xl px-4 py-3">
+            <div class="text-[11px] text-fg-sub mb-1">总播放量</div>
+            <div class="text-[18px] font-semibold text-fg-strong" x-text="formatNumber(summary.totals.views)"></div>
+        </div>
+        <div class="bg-white border border-border rounded-2xl px-4 py-3">
+            <div class="text-[11px] text-fg-sub mb-1">总点赞</div>
+            <div class="text-[18px] font-semibold text-fg-strong" x-text="formatNumber(summary.totals.likes)"></div>
+        </div>
+        <div class="bg-white border border-border rounded-2xl px-4 py-3">
+            <div class="text-[11px] text-fg-sub mb-1">总评论</div>
+            <div class="text-[18px] font-semibold text-fg-strong" x-text="formatNumber(summary.totals.comments)"></div>
+        </div>
+        <div class="bg-white border border-border rounded-2xl px-4 py-3">
+            <div class="text-[11px] text-fg-sub mb-1">总分享</div>
+            <div class="text-[18px] font-semibold text-fg-strong" x-text="formatNumber(summary.totals.shares)"></div>
+        </div>
+    </div>
+
+    <!-- Per-Platform Breakdown -->
+    <div class="bg-white border border-border rounded-2xl overflow-hidden mb-6">
+        <div class="px-4 py-3 border-b border-border">
+            <h2 class="text-[14px] font-semibold text-fg-strong">平台数据明细</h2>
+        </div>
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-border text-[12px] text-fg-sub">
+                    <th class="text-left px-4 py-3 font-medium">平台</th>
+                    <th class="text-right px-4 py-3 font-medium">视频数</th>
+                    <th class="text-right px-4 py-3 font-medium">总播放</th>
+                    <th class="text-right px-4 py-3 font-medium">总点赞</th>
+                    <th class="text-right px-4 py-3 font-medium">总评论</th>
+                    <th class="text-right px-4 py-3 font-medium">总分享</th>
+                    <th class="text-right px-4 py-3 font-medium">平均互动率</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="p in summary.platforms" :key="p.platform">
+                    <tr class="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
+                        <td class="px-4 py-3">
+                            <span class="inline-flex items-center gap-1.5 text-[13px] text-fg-strong">
+                                <i :data-lucide="platformIcons[p.platform] || 'globe'" class="w-4 h-4"></i>
+                                <span x-text="platformLabels[p.platform] || p.platform"></span>
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(p.total_videos)"></td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(p.total_views)"></td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(p.total_likes)"></td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(p.total_comments)"></td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(p.total_shares)"></td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="calcEngagement(p)"></td>
+                    </tr>
+                </template>
+                <tr x-show="summary.platforms.length === 0">
+                    <td colspan="7" class="px-4 py-12 text-center text-[13px] text-fg-sub">
+                        暂无数据，请先同步
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Top Performing Content -->
+    <div class="bg-white border border-border rounded-2xl overflow-hidden mb-6">
+        <div class="px-4 py-3 border-b border-border">
+            <h2 class="text-[14px] font-semibold text-fg-strong">热门内容</h2>
+        </div>
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-border text-[12px] text-fg-sub">
+                    <th class="text-left px-4 py-3 font-medium">标题</th>
+                    <th class="text-left px-4 py-3 font-medium">平台</th>
+                    <th class="text-right px-4 py-3 font-medium">播放量</th>
+                    <th class="text-right px-4 py-3 font-medium">点赞</th>
+                    <th class="text-right px-4 py-3 font-medium">评论</th>
+                    <th class="text-right px-4 py-3 font-medium">分享</th>
+                    <th class="text-left px-4 py-3 font-medium">发布时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="item in topContent" :key="item.publish_task_id + item.platform">
+                    <tr class="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
+                        <td class="px-4 py-3 text-[13px] text-fg-strong max-w-[240px] truncate" x-text="item.title || '未知'"></td>
+                        <td class="px-4 py-3">
+                            <span class="inline-flex items-center gap-1.5 text-[13px]">
+                                <i :data-lucide="platformIcons[item.platform] || 'globe'" class="w-4 h-4"></i>
+                                <span x-text="platformLabels[item.platform] || item.platform"></span>
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(item.views)"></td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(item.likes)"></td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(item.comments)"></td>
+                        <td class="px-4 py-3 text-right text-[13px]" x-text="formatNumber(item.shares)"></td>
+                        <td class="px-4 py-3 text-[13px] text-fg-sub" x-text="formatTime(item.published_at)"></td>
+                    </tr>
+                </template>
+                <tr x-show="topContent.length === 0">
+                    <td colspan="7" class="px-4 py-12 text-center text-[13px] text-fg-sub">
+                        暂无数据
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Token Health -->
+    <div class="bg-white border border-border rounded-2xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+            <h2 class="text-[14px] font-semibold text-fg-strong">Token 状态</h2>
+            <button @click="fetchTokenHealth()"
+                    class="text-[12px] text-fg-sub hover:text-fg-strong transition-colors flex items-center gap-1">
+                <i data-lucide="refresh-cw" class="w-3 h-3"></i> 刷新
+            </button>
+        </div>
+        <div x-show="tokenAlerts.length > 0">
+            <template x-for="alert in tokenAlerts" :key="alert.account_id + alert.platform">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-border last:border-0">
+                    <div class="flex items-center gap-2">
+                        <i :data-lucide="platformIcons[alert.platform] || 'globe'" class="w-4 h-4"></i>
+                        <span class="text-[13px] text-fg-strong" x-text="platformLabels[alert.platform] || alert.platform"></span>
+                        <span class="text-[12px] text-fg-sub" x-text="alert.account_id.substring(0, 8) + '...'"></span>
+                    </div>
+                    <div>
+                        <span x-show="alert.status === 'expired'"
+                              class="inline-block px-2.5 py-1 rounded-full text-[11px] font-medium bg-red-50 text-red-600">
+                            已过期
+                        </span>
+                        <span x-show="alert.status === 'expiring_soon'"
+                              class="inline-block px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700">
+                            <span x-text="alert.expires_in_hours + 'h 后过期'"></span>
+                        </span>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <div x-show="tokenAlerts.length === 0" class="px-4 py-8 text-center text-[13px] text-fg-sub">
+            所有 Token 状态正常
+        </div>
+    </div>
+
+    <!-- Sync Result Toast -->
+    <template x-if="syncResult">
+        <div class="fixed bottom-5 right-5 z-50 bg-white border border-border rounded-2xl shadow-card px-4 py-3 text-[13px]"
+             x-show="syncResult" x-transition>
+            <div class="text-fg-strong font-medium mb-1">同步完成</div>
+            <div class="text-fg-sub">
+                成功: <span x-text="syncResult.synced" class="text-green-600"></span> |
+                失败: <span x-text="syncResult.failed" class="text-red-600"></span> |
+                跳过: <span x-text="syncResult.skipped" class="text-fg-sub"></span>
+            </div>
+        </div>
+    </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function analyticsManager() {
+    return {
+        summary: { platforms: [], totals: { views: 0, likes: 0, comments: 0, shares: 0, videos: 0 } },
+        topContent: [],
+        tokenAlerts: [],
+        syncing: false,
+        syncResult: null,
+
+        platformLabels: {
+            youtube: 'YouTube',
+            bilibili: 'Bilibili',
+            tiktok: 'TikTok',
+            douyin: '抖音',
+            facebook: 'Facebook',
+            instagram: 'Instagram',
+            twitter: 'Twitter/X',
+            xiaohongshu: '小红书',
+            weixin_sph: '微信视频号',
+            weixin_gzh: '微信公众号',
+            kwai: '快手',
+            linkedin: 'LinkedIn',
+            pinterest: 'Pinterest',
+            threads: 'Threads',
+        },
+        platformIcons: {
+            youtube: 'youtube',
+            bilibili: 'tv-2',
+            tiktok: 'music',
+            douyin: 'music-2',
+            facebook: 'facebook',
+            instagram: 'instagram',
+            twitter: 'twitter',
+            xiaohongshu: 'book-open',
+            weixin_sph: 'video',
+            weixin_gzh: 'message-circle',
+            kwai: 'film',
+            linkedin: 'linkedin',
+            pinterest: 'image',
+            threads: 'at-sign',
+        },
+
+        async init() {
+            await Promise.all([
+                this.fetchSummary(),
+                this.fetchTopContent(),
+                this.fetchTokenHealth(),
+            ]);
+            // Auto-refresh every 60 seconds
+            setInterval(() => {
+                this.fetchSummary();
+                this.fetchTopContent();
+            }, 60000);
+        },
+
+        async fetchSummary() {
+            try {
+                const resp = await fetch('/api/analytics/summary');
+                const data = await resp.json();
+                if (data.success) this.summary = data.data;
+            } catch (_) {}
+            this.$nextTick(() => safeCreateIcons());
+        },
+
+        async fetchTopContent() {
+            try {
+                const resp = await fetch('/api/analytics/top?limit=10');
+                const data = await resp.json();
+                if (data.success) this.topContent = data.data;
+            } catch (_) {}
+            this.$nextTick(() => safeCreateIcons());
+        },
+
+        async fetchTokenHealth() {
+            try {
+                const resp = await fetch('/api/analytics/token-health');
+                const data = await resp.json();
+                if (data.success) this.tokenAlerts = data.data;
+            } catch (_) {}
+            this.$nextTick(() => safeCreateIcons());
+        },
+
+        async syncData() {
+            this.syncing = true;
+            this.syncResult = null;
+            try {
+                const resp = await fetch('/api/analytics/sync', { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    this.syncResult = data.data;
+                    await this.fetchSummary();
+                    await this.fetchTopContent();
+                    setTimeout(() => { this.syncResult = null; }, 5000);
+                } else {
+                    showToast('同步失败: ' + (data.detail || '未知错误'), 'error');
+                }
+            } catch (e) {
+                showToast('同步请求失败', 'error');
+            }
+            this.syncing = false;
+        },
+
+        formatNumber(n) {
+            if (n === null || n === undefined) return '0';
+            if (n >= 10000) return (n / 10000).toFixed(1) + '万';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+            return String(n);
+        },
+
+        formatTime(value) {
+            if (!value) return '-';
+            try {
+                const d = new Date(value);
+                if (isNaN(d.getTime())) return value;
+                return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            } catch (_) { return value; }
+        },
+
+        calcEngagement(p) {
+            const views = p.total_views || 0;
+            if (views === 0) return '0%';
+            const interactions = (p.total_likes || 0) + (p.total_comments || 0) + (p.total_shares || 0);
+            return (interactions / views * 100).toFixed(2) + '%';
+        },
+    };
+}
+</script>
+{% endblock %}
