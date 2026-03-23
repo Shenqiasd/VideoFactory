@@ -191,12 +191,12 @@ async def require_auth(request: Request) -> None:
     """
     FastAPI dependency — protect API endpoints.
 
-    * No users registered → allow (auth disabled)
+    * No users registered → 401 (must register first)
     * Valid session cookie → allow
     * Otherwise → 401
     """
     if not auth_enabled():
-        return
+        raise HTTPException(status_code=401, detail="请先注册账户")
 
     token = _extract_session(request)
     if token and verify_session_token(token):
@@ -214,14 +214,14 @@ class _AuthRedirect(Exception):
 
 async def require_auth_page(request: Request):
     """
-    Page-level auth dependency — redirect to /login if not authenticated.
+    Page-level auth dependency — redirect to /login or /register.
 
-    * No users registered → allow (auth disabled)
+    * No users registered → 302 /register
     * Valid session cookie → allow
     * Otherwise → 302 /login?next=<current_path>
     """
     if not auth_enabled():
-        return
+        raise _AuthRedirect("/register")
 
     token = _extract_session(request)
     if token and verify_session_token(token):

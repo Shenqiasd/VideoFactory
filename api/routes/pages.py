@@ -320,7 +320,7 @@ def get_scope_label(task: Dict) -> str:
 # Page Routes
 # ============================================================================
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def dashboard(request: Request):
     """Dashboard home page"""
     stats_context = _build_stats_cards_context()
@@ -342,13 +342,13 @@ async def dashboard(request: Request):
     )
 
 
-@router.get("/tasks/new", response_class=HTMLResponse)
+@router.get("/tasks/new", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def new_task_page(request: Request):
     """New task creation page"""
     return render_template(request, "new_task.html")
 
 
-@router.get("/tasks", response_class=HTMLResponse)
+@router.get("/tasks", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def tasks_list_page(request: Request):
     """Task list page"""
     status = str(request.query_params.get("status", "all") or "all")
@@ -357,55 +357,55 @@ async def tasks_list_page(request: Request):
     return render_template(request, "tasks.html", **context)
 
 
-@router.get("/tasks/{task_id}", response_class=HTMLResponse)
+@router.get("/tasks/{task_id}", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def task_detail_page(request: Request, task_id: str):
     """Task detail page"""
     return render_template(request, "task_detail.html", task_id=task_id)
 
 
-@router.get("/tasks/{task_id}/artifacts")
-async def task_artifacts_alias(task_id: str):
+@router.get("/tasks/{task_id}/artifacts", dependencies=[Depends(require_auth_page)])
+async def task_artifacts_alias(request: Request, task_id: str):
     """任务产物列表别名路由（兼容非 /api 前缀网关）。"""
     return await api_list_task_artifacts(task_id)
 
 
-@router.get("/tasks/{task_id}/artifacts/{artifact_id}/download")
-async def task_artifact_download_alias(task_id: str, artifact_id: str, inline: bool = False):
+@router.get("/tasks/{task_id}/artifacts/{artifact_id}/download", dependencies=[Depends(require_auth_page)])
+async def task_artifact_download_alias(request: Request, task_id: str, artifact_id: str, inline: bool = False):
     """任务产物下载别名路由（兼容非 /api 前缀网关）。"""
     return await api_download_task_artifact(task_id, artifact_id, inline=inline)
 
 
-@router.get("/publish", response_class=HTMLResponse)
+@router.get("/publish", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def publish_page(request: Request):
     """Publish management page"""
     return render_template(request, "publish.html")
 
 
-@router.get("/accounts", response_class=HTMLResponse)
+@router.get("/accounts", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def accounts_page(request: Request):
     """Account management page"""
     return render_template(request, "accounts.html")
 
 
-@router.get("/platform-accounts", response_class=HTMLResponse)
+@router.get("/platform-accounts", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def platform_accounts_page(request: Request):
     """Platform accounts management page (OAuth-bound accounts)"""
     return render_template(request, "platform_accounts.html")
 
 
-@router.get("/publish-v2", response_class=HTMLResponse)
+@router.get("/publish-v2", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def publish_v2_page(request: Request):
     """Multi-platform publishing management page"""
     return render_template(request, "publish_v2.html")
 
 
-@router.get("/analytics", response_class=HTMLResponse)
+@router.get("/analytics", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def analytics_page(request: Request):
     """Data analytics dashboard page"""
     return render_template(request, "analytics.html")
 
 
-@router.get("/storage", response_class=HTMLResponse)
+@router.get("/storage", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 async def storage_page(request: Request):
     """Storage management page"""
     return render_template(request, "storage.html")
