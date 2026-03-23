@@ -28,6 +28,7 @@ class Database:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.row_factory = sqlite3.Row
         self._init_tables()
 
@@ -652,7 +653,6 @@ class Database:
     def delete_platform_account(self, account_id: str) -> None:
         """删除平台账号（级联删除 oauth_credentials）"""
         with self._lock:
-            self.conn.execute("PRAGMA foreign_keys = ON")
             self.conn.execute(
                 "DELETE FROM platform_accounts WHERE id = ?", (account_id,),
             )
