@@ -215,6 +215,7 @@ class Database:
                     shares INTEGER DEFAULT 0,
                     raw_data TEXT DEFAULT '{}',
                     fetched_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(publish_task_id, platform),
                     FOREIGN KEY (publish_task_id) REFERENCES publish_tasks_v2(id) ON DELETE CASCADE
                 )
             """)
@@ -915,7 +916,8 @@ class Database:
                     id, publish_task_id, platform, post_id,
                     views, likes, comments, shares, raw_data, fetched_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
+                ON CONFLICT(publish_task_id, platform) DO UPDATE SET
+                    post_id = excluded.post_id,
                     views = excluded.views,
                     likes = excluded.likes,
                     comments = excluded.comments,
@@ -951,24 +953,18 @@ class Database:
             return results
 
     def get_analytics_summary(self) -> dict:
-        """按平台汇总分析数据（每个任务取最新一条记录）"""
+        """按平台汇总分析数据（每个 (task, platform) 仅一行，无需去重）"""
         with self._lock:
             cursor = self.conn.execute("""
                 SELECT
-                    ca.platform,
-                    COUNT(DISTINCT ca.publish_task_id) AS total_videos,
-                    SUM(ca.views) AS total_views,
-                    SUM(ca.likes) AS total_likes,
-                    SUM(ca.comments) AS total_comments,
-                    SUM(ca.shares) AS total_shares
-                FROM content_analytics ca
-                INNER JOIN (
-                    SELECT publish_task_id, MAX(fetched_at) AS max_fetched
-                    FROM content_analytics
-                    GROUP BY publish_task_id
-                ) latest ON ca.publish_task_id = latest.publish_task_id
-                           AND ca.fetched_at = latest.max_fetched
-                GROUP BY ca.platform
+                    platform,
+                    COUNT(DISTINCT publish_task_id) AS total_videos,
+                    SUM(views) AS total_views,
+                    SUM(likes) AS total_likes,
+                    SUM(comments) AS total_comments,
+                    SUM(shares) AS total_shares
+                FROM content_analytics
+                GROUP BY platform
             """)
             platforms = []
             totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0, "videos": 0}
@@ -998,12 +994,6 @@ class Database:
                     pt.title,
                     pt.published_at
                 FROM content_analytics ca
-                INNER JOIN (
-                    SELECT publish_task_id, MAX(fetched_at) AS max_fetched
-                    FROM content_analytics
-                    GROUP BY publish_task_id
-                ) latest ON ca.publish_task_id = latest.publish_task_id
-                           AND ca.fetched_at = latest.max_fetched
                 LEFT JOIN publish_tasks_v2 pt ON ca.publish_task_id = pt.id
                 ORDER BY ca.views DESC
                 LIMIT ?

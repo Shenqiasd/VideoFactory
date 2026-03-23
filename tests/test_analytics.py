@@ -117,8 +117,8 @@ class TestContentAnalyticsDB:
         assert records[0]["shares"] == 2
         assert records[0]["raw_data"]["extra"] == "data"
 
-    def test_multiple_records_for_same_task(self, db):
-        """Multiple analytics records can exist for the same task."""
+    def test_upsert_overwrites_same_task_platform(self, db):
+        """Repeated upserts for the same (task, platform) update in place."""
         task_id = "task-1"
         _seed_task(db, task_id)
         for i in range(3):
@@ -130,7 +130,9 @@ class TestContentAnalyticsDB:
                 likes=10 * (i + 1),
             )
         records = db.get_content_analytics(task_id)
-        assert len(records) == 3
+        assert len(records) == 1
+        assert records[0]["views"] == 300
+        assert records[0]["likes"] == 30
 
     def test_get_analytics_summary(self, db):
         """get_analytics_summary aggregates by platform."""
