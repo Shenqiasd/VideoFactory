@@ -525,6 +525,57 @@ class TestPublishVideo:
                 )
 
     @pytest.mark.asyncio
+    async def test_publish_with_tags(self, tiktok_service, valid_credential, tmp_path):
+        """测试发布时标签被正确添加到 description 中。"""
+        video_file = tmp_path / "test_video.mp4"
+        video_file.write_bytes(b"\x00" * 1024)
+
+        init_response = {
+            "data": {
+                "publish_id": "pub_tag_test",
+                "upload_url": "https://upload.tiktokapis.com/video/?upload_id=456",
+            },
+            "error": {"code": "ok", "message": ""},
+        }
+
+        captured_body = {}
+
+        async def mock_post(url, **kwargs):
+            if kwargs.get("json"):
+                captured_body.update(kwargs["json"])
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = init_response
+            return mock_resp
+
+        mock_upload_resp = MagicMock()
+        mock_upload_resp.status_code = 201
+
+        async def mock_put(url, **kwargs):
+            return mock_upload_resp
+
+        with patch("platform_services.tiktok.httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.post = mock_post
+            mock_client.put = mock_put
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client
+
+            result = await tiktok_service.publish_video(
+                credential=valid_credential,
+                video_path=str(video_file),
+                title="Tag Test",
+                description="Test desc",
+                tags=["funny", "viral"],
+            )
+
+        assert result.success is True
+        desc = captured_body.get("post_info", {}).get("description", "")
+        assert "#funny" in desc
+        assert "#viral" in desc
+
+    @pytest.mark.asyncio
     async def test_chunk_upload_failure(self, tiktok_service, valid_credential, tmp_path):
         """chunk 上传失败时应抛出 PublishError。"""
         video_file = tmp_path / "test_video.mp4"

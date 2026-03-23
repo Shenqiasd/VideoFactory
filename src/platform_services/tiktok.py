@@ -226,6 +226,11 @@ class TikTokService(PlatformService):
                 },
             }
 
+            # 添加话题标签到 description
+            if tags:
+                tag_text = " ".join(f"#{tag}" for tag in tags)
+                init_body["post_info"]["description"] = f"{init_body['post_info']['description']} {tag_text}"
+
             init_resp = await client.post(
                 PUBLISH_INIT_URI,
                 json=init_body,
