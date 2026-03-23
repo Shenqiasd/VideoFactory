@@ -330,7 +330,7 @@ function publishManager() {
             try {
                 const resp = await fetch('/api/oauth/platforms');
                 const data = await resp.json();
-                if (data.platforms) this.availablePlatforms = data.platforms;
+                if (data.data) this.availablePlatforms = data.data;
             } catch (e) { console.error('Failed to load platforms:', e); }
         },
 
@@ -339,7 +339,7 @@ function publishManager() {
             try {
                 const resp = await fetch(`/api/oauth/accounts?platform=${platform}`);
                 const data = await resp.json();
-                if (data.accounts) this.platformAccounts[platform] = data.accounts;
+                if (data.data) this.platformAccounts[platform] = data.data;
             } catch (e) { console.error('Failed to load accounts:', e); }
         },
 
