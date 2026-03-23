@@ -287,7 +287,6 @@ async def callback(
 
 def _build_callback_response(*, success: bool, platform: str, reason: str = "") -> HTMLResponse:
     """构建 OAuth 回调响应：弹窗模式返回自动关闭 HTML，否则重定向。"""
-    safe_platform = escape(platform)
     safe_label = escape(_PLATFORM_LOOKUP.get(platform, {}).get('label', platform))
     if success:
         title = "授权成功"
@@ -297,6 +296,15 @@ def _build_callback_response(*, success: bool, platform: str, reason: str = "") 
         title = "授权失败"
         message = f"授权被拒绝: {escape(reason)}" if reason else "授权失败"
         color = "#dc2626"
+
+    # Escape platform for JS context: json.dumps produces a quoted string,
+    # then replace '</' to prevent </script> injection (XSS).
+    # Extracted from f-string because Python < 3.12 forbids backslashes
+    # inside f-string expressions.
+    safe_platform_js = json.dumps(platform).replace("</", r"<\/")
+    success_js = "true" if success else "false"
+    icon_char = "✓" if success else "✗"
+    fallback_oauth = "success" if success else "denied"
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{title}</title>
@@ -310,19 +318,19 @@ def _build_callback_response(*, success: bool, platform: str, reason: str = "") 
   .sub {{ color: #888; font-size: 13px; margin-top: 8px; }}
 </style></head>
 <body><div class="card">
-  <div class="icon">{"✓" if success else "✗"}</div>
+  <div class="icon">{icon_char}</div>
   <div class="msg">{message}</div>
   <div class="sub">此窗口将自动关闭...</div>
 </div>
 <script>
   // 通知父窗口（如果存在）
   if (window.opener) {{
-    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {'true' if success else 'false'}, platform: {json.dumps(platform).replace('</', '<\/')}}}, '*'); }} catch(e) {{}}
+    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {success_js}, platform: {safe_platform_js}}}, '*'); }} catch(e) {{}}
   }}
   // 2 秒后自动关闭弹窗
   setTimeout(function() {{
     if (window.opener) {{ window.close(); }}
-    else {{ window.location.href = '/platform-accounts?oauth={'success' if success else 'denied'}'; }}
+    else {{ window.location.href = '/platform-accounts?oauth={fallback_oauth}'; }}
   }}, 2000);
 </script></body></html>"""
     return HTMLResponse(content=html)
