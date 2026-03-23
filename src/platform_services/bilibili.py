@@ -4,7 +4,6 @@ Bilibili 平台服务实现。
 使用 Bilibili 开放平台 OAuth2 进行认证，分片上传协议发布视频。
 """
 
-import hashlib
 import json
 import logging
 import os
