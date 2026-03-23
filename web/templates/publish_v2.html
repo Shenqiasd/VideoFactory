@@ -12,11 +12,18 @@
             <h1 class="text-[22px] font-semibold text-fg-strong">多平台发布</h1>
             <p class="text-[13px] text-fg-sub mt-1">创建和管理跨平台视频发布任务</p>
         </div>
-        <button @click="showCreateForm = !showCreateForm"
-                class="flex items-center gap-2 px-4 py-2 bg-fg-strong text-white rounded-xl text-[13px] font-medium hover:bg-black transition-colors">
-            <i data-lucide="plus" class="w-4 h-4"></i>
-            新建发布
-        </button>
+        <div class="flex items-center gap-3">
+            <button @click="showBatchForm = !showBatchForm; showCreateForm = false"
+                    class="flex items-center gap-2 px-4 py-2 border border-fg-strong text-fg-strong rounded-xl text-[13px] font-medium hover:bg-fg-strong hover:text-white transition-colors">
+                <i data-lucide="layers" class="w-4 h-4"></i>
+                全平台发布
+            </button>
+            <button @click="showCreateForm = !showCreateForm; showBatchForm = false"
+                    class="flex items-center gap-2 px-4 py-2 bg-fg-strong text-white rounded-xl text-[13px] font-medium hover:bg-black transition-colors">
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                新建发布
+            </button>
+        </div>
     </div>
 
     <!-- Stats Cards -->
@@ -118,6 +125,73 @@
                     class="px-5 py-2 bg-fg-strong text-white rounded-xl text-[13px] font-medium hover:bg-black transition-colors disabled:opacity-50">
                 <span x-show="!submitting">提交</span>
                 <span x-show="submitting">提交中...</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Batch Publish Form -->
+    <div x-show="showBatchForm" x-transition class="bg-white border border-border rounded-2xl p-6 mb-6">
+        <h2 class="text-[15px] font-semibold text-fg-strong mb-4">全平台发布</h2>
+        <p class="text-[12px] text-fg-sub mb-4">将视频一键发布到所有已连接的平台账号</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1">视频路径</label>
+                <input type="text" x-model="batchForm.video_path"
+                       placeholder="/path/to/video.mp4"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1">封面路径（可选）</label>
+                <input type="text" x-model="batchForm.cover_path"
+                       placeholder="/path/to/cover.jpg"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <div class="md:col-span-2">
+                <label class="block text-[12px] text-fg-sub mb-1">标题</label>
+                <input type="text" x-model="batchForm.title"
+                       placeholder="视频标题"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <div class="md:col-span-2">
+                <label class="block text-[12px] text-fg-sub mb-1">描述</label>
+                <textarea x-model="batchForm.description" rows="3"
+                          placeholder="视频描述"
+                          class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint resize-none"></textarea>
+            </div>
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1">标签（逗号分隔）</label>
+                <input type="text" x-model="batchForm.tags_raw"
+                       placeholder="标签1, 标签2, 标签3"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <div>
+                <label class="block text-[12px] text-fg-sub mb-1">定时发布（可选）</label>
+                <input type="datetime-local" x-model="batchForm.scheduled_at"
+                       class="w-full px-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:border-fg-faint">
+            </div>
+            <!-- Connected platforms preview -->
+            <div class="md:col-span-2">
+                <label class="block text-[12px] text-fg-sub mb-2">将发布到以下平台</label>
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="p in connectedPlatforms" :key="p.platform + '-' + p.account_id">
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-full text-[12px]">
+                            <i :data-lucide="platformIcons[p.platform] || 'globe'" class="w-3.5 h-3.5"></i>
+                            <span x-text="(platformLabels[p.platform] || p.platform) + ' (' + (p.nickname || p.account_id.substring(0,8)) + ')'"></span>
+                        </span>
+                    </template>
+                    <span x-show="connectedPlatforms.length === 0" class="text-[12px] text-fg-sub">暂无已连接平台账号</span>
+                </div>
+            </div>
+        </div>
+        <div class="flex justify-end gap-3 mt-6">
+            <button @click="showBatchForm = false"
+                    class="px-4 py-2 text-[13px] text-fg-sub hover:text-fg-strong transition-colors">
+                取消
+            </button>
+            <button @click="submitBatch()" :disabled="batchSubmitting"
+                    class="px-5 py-2 bg-fg-strong text-white rounded-xl text-[13px] font-medium hover:bg-black transition-colors disabled:opacity-50">
+                <span x-show="!batchSubmitting">全平台发布</span>
+                <span x-show="batchSubmitting">发布中...</span>
             </button>
         </div>
     </div>
@@ -243,11 +317,14 @@
 function publishManager() {
     return {
         showCreateForm: false,
+        showBatchForm: false,
         submitting: false,
+        batchSubmitting: false,
         tasks: [],
         totalTasks: 0,
         stats: {},
         availablePlatforms: [],
+        connectedPlatforms: [],
         filter: {
             status: '',
             platform: '',
@@ -262,6 +339,14 @@ function publishManager() {
             cover_path: '',
             scheduled_at: '',
             platforms: [{ platform: '', account_id: '', platform_options: {}, _accounts: [] }],
+        },
+        batchForm: {
+            video_path: '',
+            title: '',
+            description: '',
+            tags_raw: '',
+            cover_path: '',
+            scheduled_at: '',
         },
         platformLabels: {
             youtube: 'YouTube',
@@ -309,6 +394,7 @@ function publishManager() {
 
         async init() {
             await this.fetchPlatforms();
+            await this.fetchConnectedAccounts();
             await this.fetchStats();
             await this.fetchTasks();
             // Auto-refresh every 5s
@@ -324,6 +410,16 @@ function publishManager() {
                 const data = await resp.json();
                 if (data.success) this.availablePlatforms = data.data;
             } catch (_) {}
+        },
+
+        async fetchConnectedAccounts() {
+            try {
+                const resp = await fetch('/api/oauth/accounts');
+                const data = await resp.json();
+                if (data.success) {
+                    this.connectedPlatforms = data.data.filter(a => a.status === 'active');
+                }
+            } catch (_) { this.connectedPlatforms = []; }
         },
 
         async fetchStats() {
@@ -420,6 +516,55 @@ function publishManager() {
                 scheduled_at: '',
                 platforms: [{ platform: '', account_id: '', platform_options: {}, _accounts: [] }],
             };
+        },
+
+        async submitBatch() {
+            if (!this.batchForm.title || !this.batchForm.video_path) {
+                showToast('请填写标题和视频路径', 'error');
+                return;
+            }
+            if (this.connectedPlatforms.length === 0) {
+                showToast('暂无已连接的平台账号', 'error');
+                return;
+            }
+            this.batchSubmitting = true;
+            try {
+                const tags = this.batchForm.tags_raw
+                    ? this.batchForm.tags_raw.split(',').map(t => t.trim()).filter(Boolean)
+                    : [];
+                const tasks = [{
+                    video_path: this.batchForm.video_path,
+                    title: this.batchForm.title,
+                    description: this.batchForm.description,
+                    tags: tags,
+                    cover_path: this.batchForm.cover_path,
+                    platforms: this.connectedPlatforms.map(a => ({
+                        platform: a.platform,
+                        account_id: a.id,
+                        platform_options: {},
+                    })),
+                    scheduled_at: this.batchForm.scheduled_at || null,
+                }];
+                const resp = await fetch('/api/publish/v2/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tasks }),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast(`已创建 ${data.data.count} 个发布任务`, 'success');
+                    this.showBatchForm = false;
+                    this.batchForm = { video_path: '', title: '', description: '', tags_raw: '', cover_path: '', scheduled_at: '' };
+                    await this.fetchTasks();
+                    await this.fetchStats();
+                } else {
+                    showToast(data.detail || '批量创建失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败: ' + e.message, 'error');
+            } finally {
+                this.batchSubmitting = false;
+            }
         },
 
         async retryTask(taskId) {

@@ -9,9 +9,9 @@
 - `src/creation/`：高光提取、主体检测、智能裁剪、字幕/转场/BGM 组合成片
 - `src/distribute/`：发布器与调度器（含失败重试与重放）
 - `workers/`：编排器主循环 + 调度器并行运行
-- `src/platform_services/`：多平台抽象层 — PlatformService ABC、PlatformRegistry 单例、TokenManager（TTLCache + DB）、OAuth 异常
+- `src/platform_services/`：多平台抽象层 — PlatformService ABC、PlatformRegistry 单例、TokenManager（TTLCache + DB）、OAuth 异常、PublishTemplateService（发布模板管理 + 变量替换）
 - `api/auth.py`：认证模块 — 用户注册/登录、bcrypt 密码哈希、itsdangerous 签名 httpOnly Cookie 会话、Token 脱敏工具
-- `api/routes/`：任务、生产、加工、分发、系统、发布账号、存储、频道监控、OAuth、Web 页面/partials
+- `api/routes/`：任务、生产、加工、分发、系统、发布账号、存储、频道监控、OAuth、发布模板、Web 页面/partials
 - `web/templates/`：Jinja2 页面 + HTMX partials + 独立登录/注册页 + 平台账号管理页
 
 ## 2) 核心任务流
@@ -99,6 +99,7 @@
   - `platform_accounts`：平台账号（id, user_id, platform, auth_method, platform_uid, username, nickname, avatar_url, status, cookie_path）
   - `oauth_credentials`：OAuth 凭证（account_id, platform, access_token, refresh_token, expires_at, refresh_expires_at, raw）
   - `publish_tasks_v2`：发布任务 v2（account_id, platform, title, description, tags, video_path, cover_path, status, scheduled_at, attempts）
+  - `publish_templates`：发布模板（id, user_id, name, platforms, title_template, description_template, tags, platform_options, created_at, updated_at）
 - OAuth 路由（`api/routes/oauth.py`，前缀 `/api/oauth`）：
   - `GET /platforms` — 已注册平台列表
   - `GET /authorize/{platform}` — 发起 OAuth 授权（302 重定向）
@@ -107,6 +108,19 @@
   - `GET /accounts/{id}` — 账号详情
   - `DELETE /accounts/{id}` — 解绑账号
 - 前端页面：`/platform-accounts` 平台账号管理（Alpine.js）
+- 发布模板路由（`api/routes/templates.py`，前缀 `/api/templates`）：
+  - `GET /templates` — 模板列表（可选 `user_id` 过滤）
+  - `POST /templates` — 创建模板
+  - `GET /templates/{id}` — 模板详情
+  - `PUT /templates/{id}` — 更新模板
+  - `DELETE /templates/{id}` — 删除模板
+  - `POST /templates/{id}/apply` — 应用模板生成任务规格（支持 `{{var}}` 变量替换）
+- 批量发布端点（`api/routes/publish_v2.py`）：
+  - `POST /api/publish/v2/batch` — 批量创建发布任务，接受多个 `CreatePublishRequest`
+- 性能索引：
+  - `idx_publish_tasks_v2_platform_status` — `publish_tasks_v2(platform, status)` 复合索引
+  - `idx_publish_tasks_v2_published` — `publish_tasks_v2(status, published_at)` 复合索引
+  - `idx_platform_accounts_status` — `platform_accounts(platform, status)` 复合索引
 - 依赖：`cachetools>=5.3.0`
 
 ## 6) 认证系统

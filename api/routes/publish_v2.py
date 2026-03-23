@@ -70,6 +70,10 @@ class CreatePublishRequest(BaseModel):
     scheduled_at: Optional[str] = None
 
 
+class BatchPublishRequest(BaseModel):
+    tasks: List[CreatePublishRequest]
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -202,6 +206,44 @@ async def delete_task(task_id: str):
     # For other statuses (failed, cancelled, published), delete directly
     db.delete_publish_task_v2(task_id)
     return {"success": True, "message": "任务已删除"}
+
+
+@router.post("/batch")
+async def batch_create_publish_tasks(req: BatchPublishRequest):
+    """
+    一键发布到多个平台 — 批量创建发布任务。
+
+    接受多个 CreatePublishRequest，为每个平台目标创建独立任务。
+    """
+    queue = _get_queue()
+    if queue is None:
+        return JSONResponse(
+            status_code=503,
+            content={"success": False, "detail": "发布队列未初始化"},
+        )
+
+    all_tasks: list[dict] = []
+    for task_spec in req.tasks:
+        for target in task_spec.platforms:
+            task_data = {
+                "id": str(uuid.uuid4()),
+                "account_id": target.account_id,
+                "platform": target.platform,
+                "title": task_spec.title,
+                "description": task_spec.description,
+                "tags": task_spec.tags,
+                "video_path": task_spec.video_path,
+                "cover_path": task_spec.cover_path,
+                "platform_options": target.platform_options,
+                "scheduled_at": task_spec.scheduled_at,
+            }
+            task_id = await queue.enqueue(task_data)
+            all_tasks.append({"task_id": task_id, "platform": target.platform})
+
+    return {
+        "success": True,
+        "data": {"tasks": all_tasks, "count": len(all_tasks)},
+    }
 
 
 @router.get("/stats")

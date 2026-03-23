@@ -20,6 +20,7 @@ class Database:
     _VALID_TABLES = {
         "accounts", "publish_tasks", "publish_jobs", "publish_job_events",
         "platform_accounts", "oauth_credentials", "publish_tasks_v2",
+        "publish_templates",
         "content_analytics",
     }
 
@@ -201,6 +202,42 @@ class Database:
                 "ON publish_tasks_v2(scheduled_at)"
             )
 
+            # ---- Sprint 5: 发布模板 ----
+
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS publish_templates (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL DEFAULT '',
+                    name TEXT NOT NULL,
+                    platforms TEXT DEFAULT '[]',
+                    title_template TEXT DEFAULT '',
+                    description_template TEXT DEFAULT '',
+                    tags TEXT DEFAULT '[]',
+                    platform_options TEXT DEFAULT '{}',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_publish_templates_user "
+                "ON publish_templates(user_id)"
+            )
+
+            # ---- Sprint 5: 性能优化索引 ----
+
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_publish_tasks_v2_platform_status "
+                "ON publish_tasks_v2(platform, status)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_publish_tasks_v2_published "
+                "ON publish_tasks_v2(status, published_at)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_platform_accounts_status "
+                "ON platform_accounts(platform, status)"
+            )
+
             # ---- Sprint 5: 内容数据分析 ----
 
             self.conn.execute("""
@@ -227,7 +264,6 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_content_analytics_platform "
                 "ON content_analytics(platform)"
             )
-
             self.conn.commit()
 
     def _ensure_column(self, table: str, column: str, definition: str):
@@ -892,6 +928,99 @@ class Database:
                 "DELETE FROM publish_tasks_v2 WHERE id = ?", (task_id,),
             )
             self.conn.commit()
+
+    # ========== publish_templates 方法 (Sprint 5) ==========
+
+    def insert_publish_template(self, template: dict) -> None:
+        """插入发布模板"""
+        now = datetime.now().isoformat()
+        with self._lock:
+            self.conn.execute("""
+                INSERT INTO publish_templates (
+                    id, user_id, name, platforms, title_template,
+                    description_template, tags, platform_options,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                template["id"],
+                template.get("user_id", ""),
+                template["name"],
+                template.get("platforms", "[]"),
+                template.get("title_template", ""),
+                template.get("description_template", ""),
+                template.get("tags", "[]"),
+                template.get("platform_options", "{}"),
+                template.get("created_at", now),
+                template.get("updated_at", now),
+            ))
+            self.conn.commit()
+
+    def get_publish_templates(self, user_id: str = "") -> List[dict]:
+        """获取发布模板列表（可按 user_id 过滤）"""
+        with self._lock:
+            if user_id:
+                cursor = self.conn.execute(
+                    "SELECT * FROM publish_templates WHERE user_id = ? ORDER BY created_at DESC",
+                    (user_id,),
+                )
+            else:
+                cursor = self.conn.execute(
+                    "SELECT * FROM publish_templates ORDER BY created_at DESC"
+                )
+            results = []
+            for row in cursor.fetchall():
+                item = dict(row)
+                item["platforms"] = json.loads(item.get("platforms") or "[]")
+                item["tags"] = json.loads(item.get("tags") or "[]")
+                item["platform_options"] = json.loads(item.get("platform_options") or "{}")
+                results.append(item)
+            return results
+
+    def get_publish_template(self, template_id: str) -> Optional[dict]:
+        """获取单个发布模板"""
+        with self._lock:
+            cursor = self.conn.execute(
+                "SELECT * FROM publish_templates WHERE id = ?", (template_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            item["platforms"] = json.loads(item.get("platforms") or "[]")
+            item["tags"] = json.loads(item.get("tags") or "[]")
+            item["platform_options"] = json.loads(item.get("platform_options") or "{}")
+            return item
+
+    def update_publish_template(self, template_id: str, **fields) -> bool:
+        """更新发布模板字段"""
+        if not fields:
+            return False
+        allowed = {
+            "name", "platforms", "title_template",
+            "description_template", "tags", "platform_options",
+        }
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        updates["updated_at"] = datetime.now().isoformat()
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [template_id]
+        with self._lock:
+            cursor = self.conn.execute(
+                f"UPDATE publish_templates SET {set_clause} WHERE id = ?",
+                tuple(values),
+            )
+            self.conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_publish_template(self, template_id: str) -> bool:
+        """删除发布模板"""
+        with self._lock:
+            cursor = self.conn.execute(
+                "DELETE FROM publish_templates WHERE id = ?", (template_id,),
+            )
+            self.conn.commit()
+            return cursor.rowcount > 0
 
     # ========== content_analytics 方法 (Sprint 5) ==========
 
