@@ -251,7 +251,7 @@ class PublishQueue:
             else:
                 raise PlatformError(result.error or "发布失败")
 
-        except (PlatformError, TokenExpiredError) as exc:
+        except Exception as exc:
             current_attempts = attempts + 1
             if current_attempts < max_attempts:
                 delay = self.BASE_RETRY_DELAY * (2 ** current_attempts)
