@@ -15,6 +15,7 @@ import secrets
 import uuid
 from typing import Optional
 
+from cachetools import TTLCache
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -47,7 +48,7 @@ def _get_db() -> Database:
 # 生产环境建议改用 Redis 或签名 token
 # ---------------------------------------------------------------------------
 
-_oauth_states: dict[str, dict] = {}
+_oauth_states: TTLCache = TTLCache(maxsize=10000, ttl=600)
 
 
 def _create_oauth_state(platform: str) -> str:
@@ -143,7 +144,7 @@ async def callback(
     # 3. 用 code 换 token + 获取用户信息
     try:
         account_info, credential = await service.handle_callback(code=code, state=state)
-    except OAuthError as e:
+    except PlatformError as e:
         logger.error("OAuth 回调失败: platform=%s, error=%s", platform, e)
         return JSONResponse(
             status_code=400,
