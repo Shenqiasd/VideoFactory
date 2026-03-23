@@ -42,6 +42,7 @@ from api.routes.storage import router as storage_router
 from api.routes.monitor import router as monitor_router
 from api.routes.oauth import router as oauth_router
 from api.routes.publish_v2 import router as publish_v2_router, set_publish_queue
+from api.routes.analytics import router as analytics_router, init_analytics
 from core.scheduler import StorageCleanupScheduler
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ async def lifespan(app: FastAPI):
     token_manager = TokenManager(db)
     publish_queue = PublishQueue(db=db, token_manager=token_manager)
     set_publish_queue(publish_queue)
+    init_analytics(db, token_manager)
     await publish_queue.start()
     app.state.publish_queue = publish_queue
     logger.info("📤 发布队列已启动")
@@ -262,6 +264,7 @@ app.include_router(storage_router, prefix="/api", tags=["存储管理"])
 app.include_router(monitor_router, prefix="/api/monitor", tags=["频道监控"])
 app.include_router(oauth_router, prefix="/api/oauth", tags=["平台OAuth"])
 app.include_router(publish_v2_router, prefix="/api/publish/v2", tags=["多平台发布V2"])
+app.include_router(analytics_router, prefix="/api/analytics", tags=["数据分析"])
 
 
 @app.get("/api")
@@ -279,6 +282,12 @@ async def health():
     """健康检查"""
     heartbeat = read_worker_heartbeat(max_age_seconds=90)
 
+    # Add queue stats
+    queue_stats = {}
+    pq = getattr(app.state, "publish_queue", None)
+    if pq:
+        queue_stats = pq.db.count_publish_tasks_v2_by_status()
+
     return {
         "status": "healthy",
         "service": "video-factory",
@@ -288,6 +297,7 @@ async def health():
             "pid": heartbeat["pid"],
             "reason": heartbeat["reason"],
         },
+        "queue": queue_stats,
     }
 
 
