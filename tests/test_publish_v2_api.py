@@ -140,20 +140,24 @@ class TestListTasks:
         """GET /tasks should return filtered task list."""
         task = _task_record(status="published", platform="youtube")
         mock_db.get_publish_tasks_v2 = MagicMock(return_value=[task])
+        mock_db.count_publish_tasks_v2 = MagicMock(return_value=1)
 
         resp = client.get("/api/publish/v2/tasks?status=published&platform=youtube")
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
         assert len(data["data"]["tasks"]) == 1
+        assert data["data"]["total"] == 1
 
     def test_list_tasks_empty(self, client, mock_db):
         """GET /tasks should return empty list when no tasks."""
         mock_db.get_publish_tasks_v2 = MagicMock(return_value=[])
+        mock_db.count_publish_tasks_v2 = MagicMock(return_value=0)
         resp = client.get("/api/publish/v2/tasks")
         assert resp.status_code == 200
         data = resp.json()
         assert data["data"]["tasks"] == []
+        assert data["data"]["total"] == 0
 
 
 class TestGetTask:
@@ -221,7 +225,7 @@ class TestDeleteTask:
 class TestStats:
     def test_stats_endpoint(self, client, mock_db):
         """GET /stats should return counts by status."""
-        mock_db.get_publish_tasks_v2 = MagicMock(return_value=[])
+        mock_db.count_publish_tasks_v2 = MagicMock(return_value=0)
         resp = client.get("/api/publish/v2/stats")
         assert resp.status_code == 200
         data = resp.json()

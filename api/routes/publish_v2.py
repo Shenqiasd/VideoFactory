@@ -118,7 +118,13 @@ async def list_tasks(
 ):
     """任务列表（带过滤 + 分页）。"""
     db = _get_db()
-    # get_publish_tasks_v2 supports platform/status/account_id/limit
+    # True total for pagination (unbounded COUNT query)
+    total = db.count_publish_tasks_v2(
+        platform=platform,
+        status=status,
+        account_id=account_id,
+    )
+    # Fetch the page of results
     tasks = db.get_publish_tasks_v2(
         platform=platform,
         status=status,
@@ -131,7 +137,7 @@ async def list_tasks(
         "success": True,
         "data": {
             "tasks": paginated,
-            "total": len(tasks),
+            "total": total,
             "limit": limit,
             "offset": offset,
         },
@@ -198,7 +204,6 @@ async def get_stats():
     statuses = ["pending", "publishing", "published", "failed", "scheduled", "cancelled"]
     counts: dict[str, int] = {}
     for s in statuses:
-        tasks = db.get_publish_tasks_v2(status=s)
-        counts[s] = len(tasks)
+        counts[s] = db.count_publish_tasks_v2(status=s)
     counts["total"] = sum(counts.values())
     return {"success": True, "data": counts}

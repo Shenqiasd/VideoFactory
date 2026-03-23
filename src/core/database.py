@@ -808,6 +808,34 @@ class Database:
                 results.append(item)
             return results
 
+    def count_publish_tasks_v2(
+        self,
+        *,
+        platform: Optional[str] = None,
+        status: Optional[str] = None,
+        account_id: Optional[str] = None,
+    ) -> int:
+        """返回 v2 发布任务计数（无 LIMIT，用于统计和分页 total）"""
+        clauses: List[str] = []
+        params: List[object] = []
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if account_id:
+            clauses.append("account_id = ?")
+            params.append(account_id)
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._lock:
+            cursor = self.conn.execute(
+                f"SELECT COUNT(*) FROM publish_tasks_v2 {where}",
+                tuple(params),
+            )
+            return cursor.fetchone()[0]
+
     def update_publish_task_v2(self, task_id: str, **fields) -> None:
         """更新 v2 发布任务字段"""
         if not fields:
