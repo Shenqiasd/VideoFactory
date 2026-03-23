@@ -125,3 +125,40 @@ monitor:
   enabled: false
   default_check_interval: 3600
   max_auto_tasks_per_day: 50
+
+# 多平台 OAuth 配置
+# 每个平台需要在对应开放平台注册应用后填入 client_id / client_secret
+oauth:
+  # OAuth 回调基础 URL（部署后需改为实际域名）
+  callback_base_url: "http://localhost:9000"
+  youtube:
+    client_id: ""
+    client_secret: ""
+    # 需要在 Google Cloud Console 创建 OAuth 2.0 凭据
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/youtube
+  bilibili:
+    client_id: ""
+    client_secret: ""
+    # 需要在 Bilibili 开放平台注册应用
+  tiktok:
+    client_id: ""
+    client_secret: ""
+  douyin:
+    client_id: ""
+    client_secret: ""
+  facebook:
+    app_id: ""
+    app_secret: ""
+  instagram:
+    # 使用 Facebook App 的凭据
+    app_id: ""
+    app_secret: ""
+  twitter:
+    client_id: ""
+    client_secret: ""
+  pinterest:
+    client_id: ""
+    client_secret: ""
+  linkedin:
+    client_id: ""
+    client_secret: ""

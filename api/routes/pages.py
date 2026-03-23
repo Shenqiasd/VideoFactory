@@ -387,6 +387,12 @@ async def accounts_page(request: Request):
     return render_template(request, "accounts.html")
 
 
+@router.get("/platform-accounts", response_class=HTMLResponse)
+async def platform_accounts_page(request: Request):
+    """Platform accounts management page (OAuth-bound accounts)"""
+    return render_template(request, "platform_accounts.html")
+
+
 @router.get("/storage", response_class=HTMLResponse)
 async def storage_page(request: Request):
     """Storage management page"""
