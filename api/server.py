@@ -60,6 +60,35 @@ async def lifespan(app: FastAPI):
     cleanup_scheduler.start()
     app.state.storage_cleanup_scheduler = cleanup_scheduler
 
+    # 注册平台服务（YouTube / Bilibili）
+    from platform_services.registry import PlatformRegistry
+
+    callback_base = config.get("oauth", "callback_base_url", default="http://localhost:9000")
+
+    yt_client_id = config.get("oauth", "youtube", "client_id", default="")
+    yt_client_secret = config.get("oauth", "youtube", "client_secret", default="")
+    if yt_client_id and yt_client_secret:
+        from platform_services.youtube import YouTubeService
+        yt_service = YouTubeService(
+            client_id=yt_client_id,
+            client_secret=yt_client_secret,
+            redirect_uri=f"{callback_base}/api/oauth/callback/youtube",
+        )
+        PlatformRegistry.register(yt_service)
+        logger.info("YouTube 平台服务已注册")
+
+    bili_client_id = config.get("oauth", "bilibili", "client_id", default="")
+    bili_client_secret = config.get("oauth", "bilibili", "client_secret", default="")
+    if bili_client_id and bili_client_secret:
+        from platform_services.bilibili import BilibiliService
+        bili_service = BilibiliService(
+            client_id=bili_client_id,
+            client_secret=bili_client_secret,
+            redirect_uri=f"{callback_base}/api/oauth/callback/bilibili",
+        )
+        PlatformRegistry.register(bili_service)
+        logger.info("Bilibili 平台服务已注册")
+
     yield
 
     # 关闭
