@@ -224,20 +224,16 @@ async def callback(
     # 2. 获取平台服务
     service = PlatformRegistry.get(platform)
     if not service:
-        return JSONResponse(
-            status_code=404,
-            content={"success": False, "detail": f"平台 '{platform}' 未注册"},
-        )
+        _oauth_completions[state] = {"status": "error", "platform": platform, "reason": f"平台 '{platform}' 未注册"}
+        return _build_callback_response(success=False, platform=platform, reason=f"平台 '{platform}' 未注册")
 
     # 3. 用 code 换 token + 获取用户信息
     try:
         account_info, credential = await service.handle_callback(code=code, state=state)
     except PlatformError as e:
         logger.error("OAuth 回调失败: platform=%s, error=%s", platform, e)
-        return JSONResponse(
-            status_code=400,
-            content={"success": False, "detail": f"授权失败: {e}"},
-        )
+        _oauth_completions[state] = {"status": "error", "platform": platform, "reason": str(e)}
+        return _build_callback_response(success=False, platform=platform, reason=str(e))
 
     # 4. 创建/更新账号
     db = _get_db()
