@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 AUTH_URI = "https://threads.net/oauth/authorize"
 TOKEN_URI = "https://graph.threads.net/oauth/access_token"
 LONG_LIVED_TOKEN_URI = "https://graph.threads.net/access_token"
+REFRESH_TOKEN_URI = "https://graph.threads.net/refresh_access_token"
 GRAPH_API_BASE = "https://graph.threads.net/v1.0"
 
 SCOPES = "threads_basic,threads_content_publish"
@@ -175,7 +176,7 @@ class ThreadsService(PlatformService):
         """
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
-                LONG_LIVED_TOKEN_URI,
+                REFRESH_TOKEN_URI,
                 params={
                     "grant_type": "th_refresh_token",
                     "access_token": credential.access_token,
