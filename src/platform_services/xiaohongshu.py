@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import time
+from contextlib import ExitStack
 from typing import List, Optional
 from urllib.parse import urlencode
 
@@ -198,33 +199,32 @@ class XiaohongshuService(PlatformService):
         auth_headers = {"Authorization": f"Bearer {credential.access_token}"}
 
         async with httpx.AsyncClient(timeout=120) as client:
-            files = {
-                "video": (os.path.basename(video_path), open(video_path, "rb"), "video/mp4"),
-            }
-            data = {
-                "title": title,
-                "description": description or title,
-            }
-            if tags:
-                data["tags"] = json.dumps(tags)
+            with ExitStack() as stack:
+                video_fh = stack.enter_context(open(video_path, "rb"))
+                files = {
+                    "video": (os.path.basename(video_path), video_fh, "video/mp4"),
+                }
+                data = {
+                    "title": title,
+                    "description": description or title,
+                }
+                if tags:
+                    data["tags"] = json.dumps(tags)
 
-            topic_id = platform_options.get("topic_id")
-            if topic_id:
-                data["topic_id"] = topic_id
+                topic_id = platform_options.get("topic_id")
+                if topic_id:
+                    data["topic_id"] = topic_id
 
-            if cover_path and os.path.exists(cover_path):
-                files["cover"] = (os.path.basename(cover_path), open(cover_path, "rb"), "image/jpeg")
+                if cover_path and os.path.exists(cover_path):
+                    cover_fh = stack.enter_context(open(cover_path, "rb"))
+                    files["cover"] = (os.path.basename(cover_path), cover_fh, "image/jpeg")
 
-            try:
                 resp = await client.post(
                     PUBLISH_URI,
                     data=data,
                     files=files,
                     headers=auth_headers,
                 )
-            finally:
-                for _, file_tuple in files.items():
-                    file_tuple[1].close()
 
             if resp.status_code != 200:
                 raise PublishError(
