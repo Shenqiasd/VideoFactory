@@ -118,7 +118,10 @@ async def callback(
     if error or not code or not state:
         reason = error or "missing_params"
         logger.warning("OAuth 授权被拒绝或参数缺失: platform=%s, error=%s", platform, reason)
-        return RedirectResponse(url=f"/platform-accounts?oauth=denied&reason={reason}", status_code=302)
+        if state:
+            _validate_oauth_state(state)  # 消费 state，防止重放和内存泄漏
+        from urllib.parse import quote
+        return RedirectResponse(url=f"/platform-accounts?oauth=denied&reason={quote(reason, safe='')}", status_code=302)
 
     # 1. 验证 state
     state_data = _validate_oauth_state(state)
