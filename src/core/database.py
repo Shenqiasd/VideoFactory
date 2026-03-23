@@ -940,7 +940,14 @@ class Database:
                 cursor = self.conn.execute(
                     "SELECT * FROM publish_templates ORDER BY created_at DESC"
                 )
-            return [dict(row) for row in cursor.fetchall()]
+            results = []
+            for row in cursor.fetchall():
+                item = dict(row)
+                item["platforms"] = json.loads(item.get("platforms") or "[]")
+                item["tags"] = json.loads(item.get("tags") or "[]")
+                item["platform_options"] = json.loads(item.get("platform_options") or "{}")
+                results.append(item)
+            return results
 
     def get_publish_template(self, template_id: str) -> Optional[dict]:
         """获取单个发布模板"""
@@ -949,7 +956,13 @@ class Database:
                 "SELECT * FROM publish_templates WHERE id = ?", (template_id,),
             )
             row = cursor.fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            item = dict(row)
+            item["platforms"] = json.loads(item.get("platforms") or "[]")
+            item["tags"] = json.loads(item.get("tags") or "[]")
+            item["platform_options"] = json.loads(item.get("platform_options") or "{}")
+            return item
 
     def update_publish_template(self, template_id: str, **fields) -> bool:
         """更新发布模板字段"""

@@ -66,7 +66,7 @@ class TestDatabaseTemplateCRUD:
         assert result is not None
         assert result["name"] == "My Template"
         assert result["user_id"] == "user-1"
-        assert result["platforms"] == '["youtube", "bilibili"]'
+        assert result["platforms"] == ["youtube", "bilibili"]
 
     def test_get_nonexistent_template(self, db):
         """get_publish_template returns None for missing id."""
@@ -161,7 +161,7 @@ class TestPublishTemplateService:
 
         stored = db.get_publish_template(result["id"])
         assert stored is not None
-        assert json.loads(stored["platforms"]) == ["youtube", "bilibili"]
+        assert stored["platforms"] == ["youtube", "bilibili"]
 
     def test_list_templates(self, service):
         """list_templates returns all templates."""
@@ -280,7 +280,7 @@ class TestPublishTemplateService:
             platforms=["youtube"],
         )
         stored = db.get_publish_template(result["id"])
-        assert json.loads(stored["tags"]) == []
-        assert json.loads(stored["platform_options"]) == {}
+        assert stored["tags"] == []
+        assert stored["platform_options"] == {}
         assert stored["title_template"] == ""
         assert stored["description_template"] == ""

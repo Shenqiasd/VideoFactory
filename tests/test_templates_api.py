@@ -191,7 +191,7 @@ class TestUpdateTemplate:
         # Verify update
         detail = client.get(f"/api/templates/{template_id}").json()["data"]
         assert detail["name"] == "Updated Name"
-        assert json.loads(detail["platforms"]) == ["tiktok"]
+        assert detail["platforms"] == ["tiktok"]
 
     def test_update_not_found(self, client):
         """PUT /api/templates/{id} returns 404 for missing template."""

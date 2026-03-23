@@ -78,11 +78,14 @@ class PublishTemplateService:
             logger.warning("模板不存在: %s", template_id)
             return []
 
-        platforms = json.loads(template.get("platforms", "[]"))
+        raw_platforms = template.get("platforms", [])
+        platforms = json.loads(raw_platforms) if isinstance(raw_platforms, str) else raw_platforms
         title = template.get("title_template", "")
         description = template.get("description_template", "")
-        tags = json.loads(template.get("tags", "[]"))
-        options = json.loads(template.get("platform_options", "{}"))
+        raw_tags = template.get("tags", [])
+        tags = json.loads(raw_tags) if isinstance(raw_tags, str) else raw_tags
+        raw_options = template.get("platform_options", {})
+        options = json.loads(raw_options) if isinstance(raw_options, str) else raw_options
 
         # Simple variable substitution
         for k, v in (title_vars or {}).items():
