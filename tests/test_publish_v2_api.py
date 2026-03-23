@@ -48,6 +48,7 @@ def client(mock_queue, mock_db):
     the publish_v2 router, with mocked db and queue.
     """
     import api.routes.publish_v2 as pv2_module
+    from api.auth import require_auth
 
     original_db = pv2_module._db
     original_queue = pv2_module._publish_queue
@@ -55,12 +56,12 @@ def client(mock_queue, mock_db):
     pv2_module._db = mock_db
     pv2_module._publish_queue = mock_queue
 
-    # Patch require_auth to be a no-op
-    with patch("api.routes.publish_v2.require_auth", return_value=None):
-        test_app = FastAPI()
-        test_app.include_router(pv2_module.router, prefix="/api/publish/v2")
-        with TestClient(test_app, raise_server_exceptions=False) as tc:
-            yield tc
+    test_app = FastAPI()
+    test_app.include_router(pv2_module.router, prefix="/api/publish/v2")
+    # Override require_auth dependency to be a no-op (bypass login)
+    test_app.dependency_overrides[require_auth] = lambda: None
+    with TestClient(test_app, raise_server_exceptions=False) as tc:
+        yield tc
 
     pv2_module._db = original_db
     pv2_module._publish_queue = original_queue
