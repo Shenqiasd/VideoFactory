@@ -9,34 +9,20 @@
     <div class="flex items-center justify-between mb-8">
         <div>
             <h1 class="text-[22px] font-semibold text-fg-strong">平台账号</h1>
-            <p class="text-[13px] text-fg-sub mt-1">管理已绑定的社交媒体平台账号，通过 OAuth 授权安全登录</p>
+            <p class="text-[13px] text-fg-sub mt-1">管理已绑定的社交媒体平台账号，通过 OAuth 授权安全连接</p>
         </div>
+        <button @click="showConnectModal = true; $nextTick(() => safeCreateIcons())"
+                class="px-4 py-2 rounded-2xl bg-black text-white text-[13px] font-medium hover:bg-fg-strong transition flex items-center gap-2">
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            连接新频道
+        </button>
     </div>
 
-    <!-- Bind New Account -->
-    <div class="mb-8">
-        <h2 class="text-[15px] font-medium text-fg-strong mb-4">绑定新账号</h2>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            <template x-for="p in platforms" :key="p.platform">
-                <a :href="'/api/oauth/authorize/' + p.platform"
-                   class="flex flex-col items-center gap-2 p-4 rounded-2xl border border-border hover:shadow-card transition-all cursor-pointer group">
-                    <div class="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-fg group-hover:text-fg-strong transition-colors">
-                        <i :data-lucide="platformIcon(p.platform)" class="w-5 h-5"></i>
-                    </div>
-                    <span class="text-[12px] text-fg-sub group-hover:text-fg-strong transition-colors" x-text="platformLabel(p.platform)"></span>
-                </a>
-            </template>
-            <div x-show="platforms.length === 0" class="col-span-full text-center py-8 text-fg-sub text-[13px]">
-                暂无已注册的平台服务，请等待管理员配置
-            </div>
-        </div>
-    </div>
-
-    <!-- OAuth Success Toast -->
-    <template x-if="oauthSuccess">
-        <div class="mb-6 px-4 py-3 rounded-2xl border border-green-200 bg-green-50 text-green-700 text-[13px]">
-            账号绑定成功！
-        </div>
+    <!-- OAuth Result Toast -->
+    <template x-if="toastMsg">
+        <div class="mb-6 px-4 py-3 rounded-2xl border text-[13px] transition-all"
+             :class="toastType === 'success' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'"
+             x-text="toastMsg"></div>
     </template>
 
     <!-- Bound Accounts -->
@@ -50,45 +36,53 @@
         <div x-show="loading" class="text-center py-12 text-fg-sub text-[13px]">加载中...</div>
 
         <!-- Empty -->
-        <div x-show="!loading && accounts.length === 0" class="text-center py-12">
-            <div class="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-3">
-                <i data-lucide="link" class="w-6 h-6 text-fg-faint"></i>
+        <div x-show="!loading && accounts.length === 0" class="text-center py-16">
+            <div class="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
+                <i data-lucide="link" class="w-8 h-8 text-fg-faint"></i>
             </div>
-            <p class="text-fg-sub text-[13px]">还没有绑定任何平台账号</p>
-            <p class="text-fg-faint text-[12px] mt-1">点击上方平台图标开始绑定</p>
+            <p class="text-fg-sub text-[14px] font-medium">还没有绑定任何平台账号</p>
+            <p class="text-fg-faint text-[13px] mt-1">点击右上角「连接新频道」开始绑定</p>
+            <button @click="showConnectModal = true; $nextTick(() => safeCreateIcons())"
+                    class="mt-4 px-4 py-2 rounded-2xl bg-black text-white text-[13px] font-medium hover:bg-fg-strong transition">
+                连接新频道
+            </button>
         </div>
 
         <!-- Account Cards -->
-        <div x-show="!loading && accounts.length > 0" class="space-y-3">
+        <div x-show="!loading && accounts.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <template x-for="acc in accounts" :key="acc.id">
                 <div class="flex items-center gap-4 p-4 rounded-2xl border border-border hover:shadow-card transition-all">
                     <!-- Avatar -->
-                    <div class="w-10 h-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <div class="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden"
+                         :style="'background:' + (getPlatformColor(acc.platform) || '#f5f5f5') + '20'">
                         <template x-if="acc.avatar_url">
-                            <img :src="acc.avatar_url" class="w-full h-full object-cover" :alt="acc.nickname">
+                            <img :src="acc.avatar_url" class="w-full h-full object-cover rounded-full" :alt="acc.nickname">
                         </template>
                         <template x-if="!acc.avatar_url">
-                            <span class="text-[14px] font-medium text-fg" x-text="(acc.nickname || '?')[0].toUpperCase()"></span>
+                            <span class="text-[15px] font-semibold" :style="'color:' + (getPlatformColor(acc.platform) || '#787878')"
+                                  x-text="(acc.nickname || '?')[0].toUpperCase()"></span>
                         </template>
                     </div>
 
                     <!-- Info -->
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2">
-                            <span class="text-[14px] font-medium text-fg-strong truncate" x-text="acc.nickname"></span>
-                            <span class="px-2 py-0.5 rounded-lg text-[11px] bg-muted text-fg-sub" x-text="platformLabel(acc.platform)"></span>
+                            <span class="text-[14px] font-medium text-fg-strong truncate" x-text="acc.nickname || acc.username || '未知'"></span>
                             <span class="px-2 py-0.5 rounded-lg text-[11px]"
-                                  :class="acc.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'"
-                                  x-text="acc.status === 'active' ? '正常' : '异常'"></span>
+                                  :style="'background:' + (getPlatformColor(acc.platform) || '#888') + '15; color:' + (getPlatformColor(acc.platform) || '#888')"
+                                  x-text="getPlatformLabel(acc.platform)"></span>
                         </div>
-                        <div class="text-[12px] text-fg-faint mt-0.5">
-                            <span x-text="'@' + (acc.username || acc.platform_uid)"></span>
-                            <span class="mx-1">·</span>
-                            <span x-text="'绑定于 ' + formatDate(acc.created_at)"></span>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span class="flex items-center gap-1 text-[11px]"
+                                  :class="acc.status === 'active' ? 'text-green-600' : 'text-red-500'">
+                                <span class="w-1.5 h-1.5 rounded-full" :class="acc.status === 'active' ? 'bg-green-500' : 'bg-red-500'"></span>
+                                <span x-text="acc.status === 'active' ? '已连接' : '异常'"></span>
+                            </span>
+                            <span class="text-[11px] text-fg-faint" x-text="'@' + (acc.username || acc.platform_uid || '')"></span>
                         </div>
                     </div>
 
-                    <!-- Actions -->
+                    <!-- Unbind -->
                     <button @click="unbindAccount(acc.id, acc.nickname)"
                             class="px-3 py-1.5 rounded-xl text-[12px] text-red-500 hover:bg-red-50 transition-colors flex-shrink-0">
                         解绑
@@ -97,6 +91,79 @@
             </template>
         </div>
     </div>
+
+    <!-- Connect Modal (Platform Grid) -->
+    <template x-if="showConnectModal">
+        <div class="fixed inset-0 z-50 flex items-center justify-center" @keydown.escape.window="closeConnectModal()">
+            <div class="absolute inset-0 bg-black/40" @click="closeConnectModal()"></div>
+            <div class="relative bg-white rounded-3xl shadow-2xl w-[560px] max-h-[80vh] overflow-y-auto p-6 z-10">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-[17px] font-semibold text-fg-strong">连接新频道</h3>
+                    <button @click="closeConnectModal()" class="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-muted transition">
+                        <i data-lucide="x" class="w-4 h-4 text-fg-sub"></i>
+                    </button>
+                </div>
+                <p class="text-[13px] text-fg-sub mb-5">选择要连接的平台，将自动跳转到平台授权页面</p>
+                <div class="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                    <template x-for="p in allPlatforms" :key="p.platform">
+                        <button @click="startConnect(p)"
+                                class="flex flex-col items-center gap-2.5 p-4 rounded-2xl border transition-all cursor-pointer group relative"
+                                :class="p.configured ? 'border-border hover:shadow-card hover:border-fg-faint' : 'border-dashed border-fg-faint/40 opacity-50 cursor-not-allowed'"
+                                :disabled="!p.configured">
+                            <div class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors"
+                                 :style="'background:' + p.color + '12; color:' + p.color">
+                                <i :data-lucide="p.icon" class="w-5 h-5"></i>
+                            </div>
+                            <span class="text-[12px] text-fg-sub group-hover:text-fg-strong transition-colors" x-text="p.label"></span>
+                            <template x-if="!p.configured">
+                                <span class="absolute top-1.5 right-1.5 text-[9px] text-fg-faint">未配置</span>
+                            </template>
+                        </button>
+                    </template>
+                </div>
+                <p class="text-[11px] text-fg-faint mt-4 text-center">标记「未配置」的平台需要管理员先在设置中配置 OAuth 密钥</p>
+            </div>
+        </div>
+    </template>
+
+    <!-- Connecting Modal (Countdown + Polling) -->
+    <template x-if="connecting">
+        <div class="fixed inset-0 z-50 flex items-center justify-center">
+            <div class="absolute inset-0 bg-black/40"></div>
+            <div class="relative bg-white rounded-3xl shadow-2xl w-[420px] p-8 z-10 text-center">
+                <div class="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+                     :style="'background:' + (connectingPlatform.color || '#888') + '15'">
+                    <i :data-lucide="connectingPlatform.icon || 'globe'" class="w-8 h-8"
+                       :style="'color:' + (connectingPlatform.color || '#888')"></i>
+                </div>
+
+                <h3 class="text-[17px] font-semibold text-fg-strong mb-2">正在连接 <span x-text="connectingPlatform.label"></span></h3>
+                <p class="text-[13px] text-fg-sub mb-6">请在弹出窗口中完成授权，授权完成后此页面会自动更新</p>
+
+                <div class="mb-6">
+                    <div class="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                        <div class="h-full rounded-full transition-all duration-1000"
+                             :style="'width:' + countdownPercent + '%; background:' + (connectingPlatform.color || '#888')"></div>
+                    </div>
+                    <div class="flex justify-between mt-2 text-[11px] text-fg-faint">
+                        <span>等待授权中...</span>
+                        <span x-text="formatCountdown(countdown)"></span>
+                    </div>
+                </div>
+
+                <div class="flex gap-3 justify-center">
+                    <button @click="reopenAuthWindow()"
+                            class="px-4 py-2 rounded-2xl border border-border text-[13px] text-fg hover:bg-muted transition">
+                        重新打开授权页
+                    </button>
+                    <button @click="cancelConnect()"
+                            class="px-4 py-2 rounded-2xl border border-red-200 text-[13px] text-red-500 hover:bg-red-50 transition">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
 </div>
 {% endblock %}
 
@@ -104,22 +171,50 @@
 <script>
 function platformAccounts() {
     return {
-        platforms: [],
+        allPlatforms: [],
         accounts: [],
         loading: true,
-        oauthSuccess: new URLSearchParams(window.location.search).get('oauth') === 'success',
+        showConnectModal: false,
+        toastMsg: '',
+        toastType: 'success',
+
+        // Connecting state
+        connecting: false,
+        connectingPlatform: {},
+        connectState: '',
+        countdown: 300,
+        countdownPercent: 100,
+        countdownTimer: null,
+        pollTimer: null,
+        authWindow: null,
 
         async init() {
-            await Promise.all([this.loadPlatforms(), this.loadAccounts()]);
+            await Promise.all([this.loadAllPlatforms(), this.loadAccounts()]);
             this.loading = false;
-            this.$nextTick(() => safeCreateIcons());
+            this.$nextTick(function() { safeCreateIcons(); });
+
+            var params = new URLSearchParams(window.location.search);
+            if (params.get('oauth') === 'success') {
+                this.showToast('账号绑定成功！', 'success');
+                history.replaceState({}, '', '/platform-accounts');
+            } else if (params.get('oauth') === 'denied') {
+                this.showToast('授权被拒绝: ' + (params.get('reason') || '未知'), 'error');
+                history.replaceState({}, '', '/platform-accounts');
+            }
+
+            var self = this;
+            window.addEventListener('message', function(e) {
+                if (e.data && e.data.type === 'oauth-callback') {
+                    self.onOAuthComplete(e.data.success, e.data.platform);
+                }
+            });
         },
 
-        async loadPlatforms() {
+        async loadAllPlatforms() {
             try {
-                const resp = await fetch('/api/oauth/platforms');
-                const data = await resp.json();
-                this.platforms = data.data || [];
+                var resp = await fetch('/api/oauth/all-platforms');
+                var data = await resp.json();
+                this.allPlatforms = data.data || [];
             } catch (e) {
                 console.error('Failed to load platforms', e);
             }
@@ -127,42 +222,149 @@ function platformAccounts() {
 
         async loadAccounts() {
             try {
-                const resp = await fetch('/api/oauth/accounts');
-                const data = await resp.json();
+                var resp = await fetch('/api/oauth/accounts');
+                var data = await resp.json();
                 this.accounts = data.data || [];
             } catch (e) {
                 console.error('Failed to load accounts', e);
             }
         },
 
-        async unbindAccount(id, name) {
-            if (!confirm(`确定要解绑账号「${name}」吗？解绑后需要重新授权。`)) return;
+        async startConnect(platform) {
+            if (!platform.configured) {
+                this.showToast('该平台尚未配置 OAuth 密钥，请联系管理员', 'error');
+                return;
+            }
+
             try {
-                const resp = await fetch(`/api/oauth/accounts/${id}`, { method: 'DELETE' });
-                if (resp.ok) {
-                    this.accounts = this.accounts.filter(a => a.id !== id);
-                    showToast('账号已解绑', 'success');
-                } else {
-                    showToast('解绑失败', 'error');
+                var resp = await fetch('/api/oauth/connect/' + platform.platform, { method: 'POST' });
+                var data = await resp.json();
+                if (!data.success) {
+                    this.showToast(data.detail || '发起授权失败', 'error');
+                    return;
                 }
+
+                this.authWindow = window.open(data.auth_url, 'oauth_popup', 'width=600,height=700,scrollbars=yes');
+                this.connectState = data.state;
+                this.connectingPlatform = platform;
+                this.showConnectModal = false;
+                this.connecting = true;
+                this.countdown = 300;
+                this.countdownPercent = 100;
+
+                this.$nextTick(function() { safeCreateIcons(); });
+
+                this.stopTimers();
+
+                var self = this;
+                this.countdownTimer = setInterval(function() {
+                    self.countdown--;
+                    self.countdownPercent = (self.countdown / 300) * 100;
+                    if (self.countdown <= 0) {
+                        self.cancelConnect();
+                        self.showToast('授权超时，请重试', 'error');
+                    }
+                }, 1000);
+
+                this.pollTimer = setInterval(function() { self.pollStatus(); }, 2000);
+
             } catch (e) {
-                showToast('解绑失败', 'error');
+                console.error('Connect error:', e);
+                this.showToast('发起授权失败', 'error');
             }
         },
 
-        platformIcon(p) {
-            const icons = {
-                youtube: 'youtube', bilibili: 'tv', tiktok: 'music',
-                douyin: 'music-2', facebook: 'facebook', instagram: 'instagram',
-                twitter: 'twitter', pinterest: 'image', linkedin: 'linkedin',
-                kwai: 'video', xiaohongshu: 'book-open', weixin_sph: 'message-circle',
-                weixin_gzh: 'newspaper', threads: 'at-sign',
-            };
-            return icons[p] || 'globe';
+        async pollStatus() {
+            if (!this.connectState) return;
+            try {
+                var resp = await fetch('/api/oauth/connect-status/' + this.connectState);
+                var data = await resp.json();
+                if (data.completed) {
+                    if (data.status === 'success') {
+                        this.onOAuthComplete(true, data.platform);
+                    } else {
+                        this.onOAuthComplete(false, data.platform, data.reason);
+                    }
+                }
+            } catch (e) {
+                console.error('Poll error:', e);
+            }
         },
 
-        platformLabel(p) {
-            const labels = {
+        onOAuthComplete(success, platform, reason) {
+            this.stopTimers();
+            this.connecting = false;
+
+            if (this.authWindow && !this.authWindow.closed) {
+                try { this.authWindow.close(); } catch(e) {}
+            }
+            this.authWindow = null;
+
+            if (success) {
+                var label = this.getPlatformLabel(platform);
+                this.showToast(label + ' 账号绑定成功！', 'success');
+                var self = this;
+                this.loadAccounts().then(function() {
+                    self.$nextTick(function() { safeCreateIcons(); });
+                });
+            } else {
+                this.showToast('授权失败: ' + (reason || '用户取消或授权被拒绝'), 'error');
+            }
+        },
+
+        reopenAuthWindow() {
+            if (this.authWindow && !this.authWindow.closed) {
+                this.authWindow.focus();
+            } else if (this.connectState) {
+                this.startConnect(this.connectingPlatform);
+            }
+        },
+
+        cancelConnect() {
+            this.stopTimers();
+            this.connecting = false;
+            if (this.authWindow && !this.authWindow.closed) {
+                try { this.authWindow.close(); } catch(e) {}
+            }
+            this.authWindow = null;
+        },
+
+        stopTimers() {
+            if (this.countdownTimer) { clearInterval(this.countdownTimer); this.countdownTimer = null; }
+            if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+        },
+
+        closeConnectModal() {
+            this.showConnectModal = false;
+        },
+
+        async unbindAccount(id, name) {
+            if (!confirm('确定要解绑账号「' + name + '」吗？解绑后需要重新授权。')) return;
+            try {
+                var resp = await fetch('/api/oauth/accounts/' + id, { method: 'DELETE' });
+                if (resp.ok) {
+                    this.accounts = this.accounts.filter(function(a) { return a.id !== id; });
+                    this.showToast('账号已解绑', 'success');
+                } else {
+                    this.showToast('解绑失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('解绑失败', 'error');
+            }
+        },
+
+        showToast(msg, type) {
+            this.toastMsg = msg;
+            this.toastType = type;
+            var self = this;
+            setTimeout(function() { self.toastMsg = ''; }, 4000);
+            if (window.showToast) window.showToast(msg, type);
+        },
+
+        getPlatformLabel(p) {
+            var meta = this.allPlatforms.find(function(x) { return x.platform === p; });
+            if (meta) return meta.label;
+            var labels = {
                 youtube: 'YouTube', bilibili: 'Bilibili', tiktok: 'TikTok',
                 douyin: '抖音', facebook: 'Facebook', instagram: 'Instagram',
                 twitter: 'X (Twitter)', pinterest: 'Pinterest', linkedin: 'LinkedIn',
@@ -170,6 +372,18 @@ function platformAccounts() {
                 weixin_gzh: '微信公众号', threads: 'Threads',
             };
             return labels[p] || p;
+        },
+
+        getPlatformColor(p) {
+            var meta = this.allPlatforms.find(function(x) { return x.platform === p; });
+            if (meta) return meta.color;
+            return '#888';
+        },
+
+        formatCountdown(seconds) {
+            var m = Math.floor(seconds / 60);
+            var s = seconds % 60;
+            return m + ':' + s.toString().padStart(2, '0');
         },
 
         formatDate(dateStr) {

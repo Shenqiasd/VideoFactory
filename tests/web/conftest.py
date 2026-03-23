@@ -22,20 +22,17 @@ def _isolate_home(tmp_path, monkeypatch):
     monkeypatch.setenv("VF_USERS_FILE", str(tmp_path / "users.json"))
 
     from api.routes import distribute as distribute_routes
-    from api.routes import publish as publish_routes
     from api.routes import tasks as tasks_routes
     from core.config import Config
 
     tasks_routes._task_store = None
     distribute_routes._task_store = None
     distribute_routes._scheduler = None
-    publish_routes._db = None
     Config.reset()
     yield
     tasks_routes._task_store = None
     distribute_routes._task_store = None
     distribute_routes._scheduler = None
-    publish_routes._db = None
     Config.reset()
 
 
