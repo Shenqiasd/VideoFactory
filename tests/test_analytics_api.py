@@ -226,8 +226,7 @@ class TestAuthRequired:
         # Do NOT override require_auth — let it enforce auth
 
         with TestClient(test_app, raise_server_exceptions=False) as tc:
-            # Auth is disabled when no users exist, so these should succeed
-            # but the dependency is still registered on the router
+            # With no users registered, require_auth raises 401
+            # ("请先注册账户") — auth is NOT disabled, it blocks access.
             resp = tc.get("/api/analytics/summary")
-            # With no users, auth is disabled → 200
-            assert resp.status_code == 200
+            assert resp.status_code == 401

@@ -29,6 +29,18 @@ storage:
     path.write_text(content.strip() + "\n", encoding="utf-8")
 
 
+def _make_authed_client(tmp_path, monkeypatch):
+    """Create a TestClient with a registered user so require_auth passes."""
+    users_file = tmp_path / "users.json"
+    monkeypatch.setenv("VF_USERS_FILE", str(users_file))
+    client = TestClient(app)
+    client.post(
+        "/api/auth/register",
+        json={"username": "testuser", "password": "testpass123"},
+    )
+    return client
+
+
 def test_storage_list_and_delete_local(tmp_path, monkeypatch):
     config_path = tmp_path / "settings.yaml"
     working_dir = tmp_path / "working"
@@ -43,6 +55,14 @@ def test_storage_list_and_delete_local(tmp_path, monkeypatch):
     Config.reset()
 
     with TestClient(app) as client:
+        # Register a user so require_auth allows mutating endpoints
+        users_file = tmp_path / "users.json"
+        monkeypatch.setenv("VF_USERS_FILE", str(users_file))
+        client.post(
+            "/api/auth/register",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+
         resp = client.get("/api/storage/files?location=local&path=working")
         assert resp.status_code == 200
         payload = resp.json()
@@ -80,6 +100,13 @@ def test_storage_cleanup_local(tmp_path, monkeypatch):
     Config.reset()
 
     with TestClient(app) as client:
+        users_file = tmp_path / "users.json"
+        monkeypatch.setenv("VF_USERS_FILE", str(users_file))
+        client.post(
+            "/api/auth/register",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+
         resp = client.post(
             "/api/storage/cleanup",
             json={"location": "local", "path": "working", "days": 1},
@@ -103,6 +130,13 @@ def test_storage_cleanup_config_update(tmp_path, monkeypatch):
     Config.reset()
 
     with TestClient(app) as client:
+        users_file = tmp_path / "users.json"
+        monkeypatch.setenv("VF_USERS_FILE", str(users_file))
+        client.post(
+            "/api/auth/register",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+
         get_resp = client.get("/api/storage/cleanup-config")
         assert get_resp.status_code == 200
         data = get_resp.json()
