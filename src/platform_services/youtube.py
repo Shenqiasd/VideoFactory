@@ -4,6 +4,7 @@ YouTube 平台服务实现。
 使用 Google OAuth2 进行授权，google-api-python-client 进行视频上传。
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -204,29 +205,30 @@ class YouTubeService(PlatformService):
             client_secret=self.client_secret,
         )
 
-        youtube = build("youtube", "v3", credentials=creds)
+        def _sync_upload() -> dict:
+            """同步上传逻辑，在线程池中运行以避免阻塞事件循环。"""
+            youtube = build("youtube", "v3", credentials=creds)
 
-        body = {
-            "snippet": {
-                "title": title,
-                "description": description,
-                "tags": tags or [],
-                "categoryId": platform_options.get("category_id", "22"),
-            },
-            "status": {
-                "privacyStatus": platform_options.get("privacy", "private"),
-                "selfDeclaredMadeForKids": False,
-            },
-        }
+            body = {
+                "snippet": {
+                    "title": title,
+                    "description": description,
+                    "tags": tags or [],
+                    "categoryId": platform_options.get("category_id", "22"),
+                },
+                "status": {
+                    "privacyStatus": platform_options.get("privacy", "private"),
+                    "selfDeclaredMadeForKids": False,
+                },
+            }
 
-        media = MediaFileUpload(
-            video_path,
-            mimetype="video/*",
-            resumable=True,
-            chunksize=10 * 1024 * 1024,  # 10 MB chunks
-        )
+            media = MediaFileUpload(
+                video_path,
+                mimetype="video/*",
+                resumable=True,
+                chunksize=10 * 1024 * 1024,  # 10 MB chunks
+            )
 
-        try:
             request = youtube.videos().insert(
                 part="snippet,status",
                 body=body,
@@ -242,6 +244,10 @@ class YouTubeService(PlatformService):
                         status.progress() * 100,
                     )
 
+            return response
+
+        try:
+            response = await asyncio.to_thread(_sync_upload)
             video_id = response["id"]
             logger.info("YouTube upload complete: video_id=%s", video_id)
 
@@ -251,6 +257,8 @@ class YouTubeService(PlatformService):
                 permalink=f"https://www.youtube.com/watch?v={video_id}",
                 status="published",
             )
+        except PublishError:
+            raise
         except Exception as e:
             logger.error("YouTube upload failed: %s", e)
             raise PublishError(f"YouTube upload failed: {e}")
