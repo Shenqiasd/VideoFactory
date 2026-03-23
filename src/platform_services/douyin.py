@@ -140,12 +140,13 @@ class DouyinService(PlatformService):
     async def refresh_token(
         self, credential: OAuthCredential,
     ) -> OAuthCredential:
-        """刷新 refresh_token（抖音使用 renew_refresh_token 接口续期）。"""
+        """刷新 access_token（使用 refresh_token 换取新 access_token）。"""
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                REFRESH_URI,
+                TOKEN_URI,
                 data={
                     "client_key": self.client_key,
+                    "grant_type": "refresh_token",
                     "refresh_token": credential.refresh_token,
                 },
             )
@@ -162,7 +163,7 @@ class DouyinService(PlatformService):
                 )
 
         return OAuthCredential(
-            access_token=credential.access_token,  # renew_refresh_token 不返回新 access_token
+            access_token=token_data["access_token"],
             refresh_token=token_data.get("refresh_token", credential.refresh_token),
             expires_at=int(time.time()) + token_data.get("expires_in", 86400),
             raw=json.dumps(resp_data),

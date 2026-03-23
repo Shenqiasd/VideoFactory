@@ -297,11 +297,12 @@ class TestHandleCallback:
 class TestRefreshToken:
     @pytest.mark.asyncio
     async def test_successful_refresh(self, douyin_service, valid_credential):
-        """刷新成功应返回新凭证（保留 access_token，更新 refresh_token）。"""
+        """刷新成功应返回新的 access_token 和 refresh_token。"""
         refresh_response = {
             "data": {
+                "access_token": "act.refreshed_token",
                 "refresh_token": "rft.renewed_refresh",
-                "expires_in": 2592000,
+                "expires_in": 86400,
                 "error_code": 0,
                 "description": "",
             },
@@ -324,8 +325,7 @@ class TestRefreshToken:
 
             new_credential = await douyin_service.refresh_token(valid_credential)
 
-        # renew_refresh_token preserves access_token
-        assert new_credential.access_token == valid_credential.access_token
+        assert new_credential.access_token == "act.refreshed_token"
         assert new_credential.refresh_token == "rft.renewed_refresh"
         assert new_credential.expires_at > int(time.time())
 
