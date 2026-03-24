@@ -1033,3 +1033,96 @@ async def get_youtube_cookies():
     except Exception as e:
         logger.error(f"❌ 读取 YouTube cookies 失败: {e}")
         raise HTTPException(status_code=500, detail=f"读取失败: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# OAuth 平台配置
+# ---------------------------------------------------------------------------
+
+# 每个平台在 settings.yaml 中的密钥字段名映射
+_OAUTH_PLATFORM_FIELDS: dict[str, tuple[str, str]] = {
+    "youtube":      ("client_id", "client_secret"),
+    "bilibili":     ("client_id", "client_secret"),
+    "tiktok":       ("client_id", "client_secret"),
+    "douyin":       ("client_id", "client_secret"),
+    "facebook":     ("app_id",    "app_secret"),
+    "instagram":    ("app_id",    "app_secret"),
+    "twitter":      ("client_id", "client_secret"),
+    "pinterest":    ("client_id", "client_secret"),
+    "linkedin":     ("client_id", "client_secret"),
+    "kwai":         ("client_id", "client_secret"),
+    "xiaohongshu":  ("client_id", "client_secret"),
+    "weixin_sph":   ("app_id",    "app_secret"),
+    "weixin_gzh":   ("app_id",    "app_secret"),
+    "threads":      ("app_id",    "app_secret"),
+}
+
+_MASK = "****"
+
+
+class OAuthSettingsRequest(BaseModel):
+    callback_base_url: str = ""
+    platforms: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+@router.get("/settings/oauth", dependencies=[Depends(require_auth)])
+async def get_oauth_settings():
+    """读取 OAuth 配置（密钥脱敏）。"""
+    config_data = _read_yaml_config()
+    oauth: dict = config_data.get("oauth") or {}
+    callback_base_url = oauth.get("callback_base_url", "http://localhost:9000")
+
+    platforms: dict[str, dict[str, str]] = {}
+    for plat, (id_key, sec_key) in _OAUTH_PLATFORM_FIELDS.items():
+        plat_cfg = oauth.get(plat) or {}
+        raw_id = plat_cfg.get(id_key, "")
+        raw_sec = plat_cfg.get(sec_key, "")
+        platforms[plat] = {
+            "id_field": id_key,
+            "secret_field": sec_key,
+            "id_value": (_MASK + raw_id[-4:]) if raw_id else "",
+            "secret_value": (_MASK + raw_sec[-4:]) if raw_sec else "",
+        }
+
+    return {"success": True, "callback_base_url": callback_base_url, "platforms": platforms}
+
+
+@router.post("/settings/oauth", dependencies=[Depends(require_auth)])
+async def set_oauth_settings(request: OAuthSettingsRequest):
+    """保存 OAuth 配置并动态重新注册平台服务。"""
+    config_data = _read_yaml_config()
+    oauth: dict = config_data.get("oauth") or {}
+
+    if request.callback_base_url.strip():
+        oauth["callback_base_url"] = request.callback_base_url.strip().rstrip("/")
+
+    for plat, new_vals in request.platforms.items():
+        if plat not in _OAUTH_PLATFORM_FIELDS:
+            continue
+        id_key, sec_key = _OAUTH_PLATFORM_FIELDS[plat]
+        existing = oauth.get(plat) or {}
+
+        new_id = new_vals.get("id_value", "")
+        new_sec = new_vals.get("secret_value", "")
+
+        # 空字符串或以 **** 开头 → 保留原值
+        if not new_id or new_id.startswith(_MASK):
+            new_id = existing.get(id_key, "")
+        if not new_sec or new_sec.startswith(_MASK):
+            new_sec = existing.get(sec_key, "")
+
+        oauth[plat] = {id_key: new_id, sec_key: new_sec}
+
+    config_data["oauth"] = oauth
+    _write_yaml_config(config_data)
+    Config.reset()
+
+    # 动态重新注册平台服务（热加载）
+    from api.server import register_platform_services
+    registered = register_platform_services()
+
+    return {
+        "success": True,
+        "message": f"OAuth 配置已保存，{registered} 个平台已激活",
+        "registered_count": registered,
+    }
