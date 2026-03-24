@@ -129,6 +129,14 @@ monitor:
 # 多平台 OAuth 配置
 # 每个平台需要在对应开放平台注册应用后填入 client_id / client_secret
 # 只有配置了密钥的平台才会在启动时注册并可用
+#
+# 支持环境变量配置（优先级高于此文件），适合 Railway/Docker 部署：
+#   OAUTH_CALLBACK_BASE_URL=https://your-domain.com
+#   OAUTH_YOUTUBE_CLIENT_ID=xxx
+#   OAUTH_YOUTUBE_CLIENT_SECRET=xxx
+#   OAUTH_FACEBOOK_APP_ID=xxx
+#   OAUTH_FACEBOOK_APP_SECRET=xxx
+#   ... 以此类推，命名规则: OAUTH_{PLATFORM}_{FIELD}
 oauth:
   # OAuth 回调基础 URL（部署后需改为实际域名）
   callback_base_url: "http://localhost:9000"

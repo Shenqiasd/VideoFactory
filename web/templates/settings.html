@@ -489,13 +489,19 @@
 
             <!-- OAuth 平台配置 -->
             <div x-show="active === 'oauth'" x-transition x-cloak>
-                <h2 class="text-[15px] font-semibold text-fg-strong mb-1">OAuth 平台配置</h2>
-                <p class="text-[12px] text-fg-sub mb-5">配置各平台的 OAuth 密钥后，即可在「平台账号」页面一键授权绑定</p>
+                <h2 class="text-[15px] font-semibold text-fg-strong mb-1">OAuth 平台配置（管理员）</h2>
+                <p class="text-[12px] text-fg-sub mb-2">配置各平台的 OAuth 应用密钥，配置后用户即可在「平台账号」页面一键授权绑定</p>
+                <div class="rounded-xl bg-blue-50 border border-blue-200 px-3 py-2 mb-5">
+                    <p class="text-[11px] text-blue-700"><strong>环境变量优先：</strong>可通过环境变量配置（如 <code class="bg-blue-100 px-1 rounded">OAUTH_YOUTUBE_CLIENT_ID</code>），适合 Railway / Docker 部署。已通过环境变量配置的平台标记为「环境变量」且不可在此页面编辑。</p>
+                </div>
 
                 <div class="space-y-4" id="oauth-platforms-container">
                     <!-- 回调地址 -->
                     <div class="rounded-2xl border border-border p-4">
-                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">OAuth 回调基础 URL</label>
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <label class="block text-[13px] font-medium text-fg-strong">OAuth 回调基础 URL</label>
+                            <span id="oauth-callback-env-badge" class="hidden px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">环境变量</span>
+                        </div>
                         <p class="text-[11px] text-fg-sub mb-2">部署后需改为实际域名，如 https://your-domain.com</p>
                         <input id="oauth-callback-base-url" type="url" placeholder="http://localhost:9000"
                                class="w-full h-10 px-4 rounded-2xl border border-border text-[13px] text-fg-strong outline-none" />
@@ -1221,12 +1227,21 @@
         const secField = data?.secret_field || 'client_secret';
         const idVal = data?.id_value || '';
         const secVal = data?.secret_value || '';
+        const fromEnv = data?.from_env || false;
         const configured = !!(idVal && secVal);
 
         const statusDot = configured
             ? '<span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5"></span>'
             : '<span class="inline-block w-2 h-2 rounded-full bg-fg-faint mr-1.5"></span>';
         const statusText = configured ? '已配置' : '未配置';
+        const envBadge = fromEnv
+            ? '<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">环境变量</span>'
+            : '';
+        const readonly = fromEnv ? 'readonly' : '';
+        const inputExtraCls = fromEnv ? ' bg-muted cursor-not-allowed' : '';
+        const envHint = fromEnv
+            ? `<p class="text-[10px] text-green-600 mt-1">OAUTH_${plat.key.toUpperCase()}_${idField.toUpperCase()} / OAUTH_${plat.key.toUpperCase()}_${secField.toUpperCase()}</p>`
+            : '';
 
         return `
         <div class="rounded-xl border border-border p-3" data-oauth-platform="${plat.key}">
@@ -1235,6 +1250,7 @@
                     ${statusDot}
                     <span class="text-[13px] font-semibold text-fg-strong">${plat.name}</span>
                     <span class="ml-2 text-[11px] text-fg-sub">${statusText}</span>
+                    ${envBadge}
                 </div>
             </div>
             <p class="text-[11px] text-fg-sub mb-2">${plat.help}</p>
@@ -1242,16 +1258,17 @@
                 <div>
                     <label class="block text-[11px] text-fg-sub mb-1">${idField}</label>
                     <input id="oauth-${plat.key}-id" type="text" value="${_escAttr(idVal)}"
-                           placeholder="输入 ${idField}"
-                           class="w-full h-8 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none" />
+                           placeholder="输入 ${idField}" ${readonly}
+                           class="w-full h-8 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none${inputExtraCls}" />
                 </div>
                 <div>
                     <label class="block text-[11px] text-fg-sub mb-1">${secField}</label>
                     <input id="oauth-${plat.key}-secret" type="password" value="${_escAttr(secVal)}"
-                           placeholder="输入 ${secField}"
-                           class="w-full h-8 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none" />
+                           placeholder="输入 ${secField}" ${readonly}
+                           class="w-full h-8 px-3 rounded-xl border border-border text-[12px] text-fg-strong outline-none${inputExtraCls}" />
                 </div>
             </div>
+            ${envHint}
         </div>`;
     }
 
@@ -1282,7 +1299,19 @@
             const resp = await fetch(oauthEndpoint, { method: 'GET' });
             if (!resp.ok) throw new Error('load_failed');
             const data = await resp.json();
-            setValue('oauth-callback-base-url', data.callback_base_url || '');
+            const cbInput = byId('oauth-callback-base-url');
+            if (cbInput) {
+                cbInput.value = data.callback_base_url || '';
+                if (data.callback_from_env) {
+                    cbInput.readOnly = true;
+                    cbInput.classList.add('bg-muted', 'cursor-not-allowed');
+                } else {
+                    cbInput.readOnly = false;
+                    cbInput.classList.remove('bg-muted', 'cursor-not-allowed');
+                }
+            }
+            var envBadge = byId('oauth-callback-env-badge');
+            if (envBadge) envBadge.classList.toggle('hidden', !data.callback_from_env);
             _renderOAuthPlatforms(data);
         } catch (err) {
             console.error('Failed to load OAuth settings:', err);
