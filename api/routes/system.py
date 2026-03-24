@@ -555,16 +555,19 @@ def _read_yaml_config() -> dict[str, Any]:
     if not path.exists():
         # 自动从 example 创建
         example = path.parent / "settings.example.yaml"
-        if example.exists():
-            import shutil
-            path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(example, path)
-            logger.info("配置文件不存在，已从 settings.example.yaml 自动创建: %s", path)
-        else:
-            # 创建最小空配置
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(yaml.safe_dump({}, allow_unicode=True), encoding="utf-8")
-            logger.info("配置文件不存在，已创建空配置: %s", path)
+        try:
+            if example.exists():
+                import shutil
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(example, path)
+                logger.info("配置文件不存在，已从 settings.example.yaml 自动创建: %s", path)
+            else:
+                # 创建最小空配置
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(yaml.safe_dump({}, allow_unicode=True), encoding="utf-8")
+                logger.info("配置文件不存在，已创建空配置: %s", path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"自动创建配置文件失败: {str(e)}") from e
     try:
         content = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(content, dict):
