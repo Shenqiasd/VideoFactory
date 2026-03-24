@@ -409,8 +409,9 @@ async def storage_page(request: Request):
 async def login_page(request: Request):
     """Auth page (login tab) — combined login/register with client-side tab switching."""
     if not auth_enabled():
-        # No users yet — show register tab
-        return render_template(request, "auth.html")
+        # No users yet — redirect to /register so JS picks up register tab
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/register", status_code=302)
     return render_template(request, "auth.html")
 
 
