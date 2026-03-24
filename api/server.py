@@ -39,7 +39,7 @@ from api.routes.system import router as system_router
 from api.routes.pages import router as pages_router
 from api.routes.storage import router as storage_router
 from api.routes.monitor import router as monitor_router
-from api.routes.oauth import router as oauth_router
+from api.routes.oauth import router as oauth_router, public_router as oauth_public_router
 from api.routes.publish_v2 import router as publish_v2_router, set_publish_queue
 from api.routes.templates import router as templates_router
 from api.routes.analytics import router as analytics_router, init_analytics
@@ -314,7 +314,7 @@ class _RegisterRequest(BaseModel):
 
 
 @app.post("/api/auth/register")
-async def auth_register(body: _RegisterRequest):
+async def auth_register(body: _RegisterRequest, body_request: Request):
     if not registration_allowed():
         return JSONResponse(
             status_code=403,
@@ -341,12 +341,13 @@ async def auth_register(body: _RegisterRequest):
         )
     token = create_session_token(username)
     response = JSONResponse(content={"success": True, "message": "注册成功"})
+    is_https = str(body_request.url).startswith("https") or body_request.headers.get("x-forwarded-proto") == "https"
     response.set_cookie(
         key=_COOKIE_NAME,
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=is_https,
         max_age=_SESSION_MAX_AGE,
         path="/",
     )
@@ -354,7 +355,7 @@ async def auth_register(body: _RegisterRequest):
 
 
 @app.post("/api/auth/login")
-async def auth_login(body: _LoginRequest):
+async def auth_login(body: _LoginRequest, body_request: Request):
     if not auth_enabled():
         return JSONResponse(
             status_code=401,
@@ -369,12 +370,13 @@ async def auth_login(body: _LoginRequest):
         )
     token = create_session_token(username)
     response = JSONResponse(content={"success": True, "message": "登录成功"})
+    is_https = str(body_request.url).startswith("https") or body_request.headers.get("x-forwarded-proto") == "https"
     response.set_cookie(
         key=_COOKIE_NAME,
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=is_https,
         max_age=_SESSION_MAX_AGE,
         path="/",
     )
@@ -419,6 +421,7 @@ app.include_router(system_router, prefix="/api/system", tags=["系统"])
 app.include_router(storage_router, prefix="/api", tags=["存储管理"])
 app.include_router(monitor_router, prefix="/api/monitor", tags=["频道监控"])
 app.include_router(oauth_router, prefix="/api/oauth", tags=["平台OAuth"])
+app.include_router(oauth_public_router, prefix="/api/oauth", tags=["平台OAuth"])
 app.include_router(publish_v2_router, prefix="/api/publish/v2", tags=["多平台发布V2"])
 app.include_router(templates_router, prefix="/api/templates", tags=["发布模板"])
 app.include_router(analytics_router, prefix="/api/analytics", tags=["数据分析"])

@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
+# Public router for endpoints that must NOT require auth (e.g. OAuth callbacks).
+# OAuth callbacks are called via redirect from external providers (Google, etc.)
+# and may not carry session cookies reliably across cross-site redirects.
+# Security is provided by the one-time state token instead.
+public_router = APIRouter()
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -187,7 +193,7 @@ async def authorize(platform: str, request: Request):
     return RedirectResponse(url=auth_url, status_code=302)
 
 
-@router.get("/callback/{platform}")
+@public_router.get("/callback/{platform}")
 async def callback(
     platform: str,
     code: Optional[str] = Query(None),
@@ -302,6 +308,7 @@ def _build_callback_response(*, success: bool, platform: str, reason: str = "") 
     # Extracted from f-string because Python < 3.12 forbids backslashes
     # inside f-string expressions.
     safe_platform_js = json.dumps(platform).replace("</", r"<\/")
+    safe_reason_js = json.dumps(reason).replace("</", r"<\/")
     success_js = "true" if success else "false"
     icon_char = "✓" if success else "✗"
     fallback_oauth = "success" if success else "denied"
@@ -325,7 +332,7 @@ def _build_callback_response(*, success: bool, platform: str, reason: str = "") 
 <script>
   // 通知父窗口（如果存在）
   if (window.opener) {{
-    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {success_js}, platform: {safe_platform_js}}}, '*'); }} catch(e) {{}}
+    try {{ window.opener.postMessage({{type: 'oauth-callback', success: {success_js}, platform: {safe_platform_js}, reason: {safe_reason_js}}}, '*'); }} catch(e) {{}}
   }}
   // 2 秒后自动关闭弹窗
   setTimeout(function() {{
