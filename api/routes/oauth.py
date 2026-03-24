@@ -76,20 +76,20 @@ def _validate_oauth_state(state: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 ALL_PLATFORMS = [
-    {"platform": "youtube",    "label": "YouTube",   "icon": "youtube",         "color": "#FF0000"},
-    {"platform": "bilibili",   "label": "Bilibili",  "icon": "tv",              "color": "#00A1D6"},
-    {"platform": "tiktok",     "label": "TikTok",    "icon": "music",           "color": "#000000"},
-    {"platform": "douyin",     "label": "抖音",       "icon": "music-2",         "color": "#000000"},
-    {"platform": "facebook",   "label": "Facebook",  "icon": "facebook",        "color": "#1877F2"},
-    {"platform": "instagram",  "label": "Instagram", "icon": "instagram",       "color": "#E4405F"},
-    {"platform": "twitter",    "label": "X (Twitter)","icon": "twitter",        "color": "#000000"},
-    {"platform": "pinterest",  "label": "Pinterest", "icon": "image",           "color": "#BD081C"},
-    {"platform": "linkedin",   "label": "LinkedIn",  "icon": "linkedin",        "color": "#0A66C2"},
-    {"platform": "kwai",       "label": "快手",       "icon": "video",           "color": "#FF4906"},
-    {"platform": "xiaohongshu","label": "小红书",     "icon": "book-open",       "color": "#FE2C55"},
-    {"platform": "weixin_sph", "label": "微信视频号",  "icon": "message-circle", "color": "#07C160"},
-    {"platform": "weixin_gzh", "label": "微信公众号",  "icon": "newspaper",      "color": "#07C160"},
-    {"platform": "threads",    "label": "Threads",   "icon": "at-sign",         "color": "#000000"},
+    {"platform": "youtube",    "label": "YouTube",   "icon": "youtube",         "color": "#FF0000", "auth": "oauth2"},
+    {"platform": "bilibili",   "label": "Bilibili",  "icon": "tv",              "color": "#00A1D6", "auth": "oauth2"},
+    {"platform": "tiktok",     "label": "TikTok",    "icon": "music",           "color": "#000000", "auth": "oauth2"},
+    {"platform": "douyin",     "label": "抖音",       "icon": "music-2",         "color": "#000000", "auth": "oauth2"},
+    {"platform": "facebook",   "label": "Facebook",  "icon": "facebook",        "color": "#1877F2", "auth": "oauth2"},
+    {"platform": "instagram",  "label": "Instagram", "icon": "instagram",       "color": "#E4405F", "auth": "oauth2"},
+    {"platform": "twitter",    "label": "X (Twitter)","icon": "twitter",        "color": "#000000", "auth": "oauth2"},
+    {"platform": "pinterest",  "label": "Pinterest", "icon": "image",           "color": "#BD081C", "auth": "oauth2"},
+    {"platform": "linkedin",   "label": "LinkedIn",  "icon": "linkedin",        "color": "#0A66C2", "auth": "oauth2"},
+    {"platform": "kwai",       "label": "快手",       "icon": "video",           "color": "#FF4906", "auth": "oauth2"},
+    {"platform": "xiaohongshu","label": "小红书",     "icon": "book-open",       "color": "#FE2C55", "auth": "plugin"},
+    {"platform": "weixin_sph", "label": "微信视频号",  "icon": "message-circle", "color": "#07C160", "auth": "oauth2"},
+    {"platform": "weixin_gzh", "label": "微信公众号",  "icon": "newspaper",      "color": "#07C160", "auth": "oauth2"},
+    {"platform": "threads",    "label": "Threads",   "icon": "at-sign",         "color": "#000000", "auth": "oauth2"},
 ]
 
 _PLATFORM_LOOKUP = {p["platform"]: p for p in ALL_PLATFORMS}
@@ -107,13 +107,19 @@ async def list_platforms():
 
 @router.get("/all-platforms")
 async def list_all_platforms():
-    """列出所有支持的平台（含未配置），标注 configured 状态。"""
+    """列出所有 14 个硬编码平台，标注 configured 状态。
+
+    configured = 环境变量已配置且平台已注册到 PlatformRegistry。
+    小红书 (auth=plugin) 始终显示为已配置。
+    """
     registered = {p["platform"] for p in PlatformRegistry.list_platforms()}
     result = []
     for p in ALL_PLATFORMS:
+        # 插件类平台始终可用；OAuth 平台需检查环境变量是否已配置
+        configured = p["auth"] == "plugin" or p["platform"] in registered
         result.append({
             **p,
-            "configured": p["platform"] in registered,
+            "configured": configured,
         })
     return {"success": True, "data": result}
 
