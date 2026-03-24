@@ -41,7 +41,7 @@ class WeixinChannelsService(PlatformService):
     """微信视频号平台服务（Weixin Open Platform OAuth2）。"""
 
     platform = PlatformType.WEIXIN_SPH
-    auth_method = AuthMethod.OAUTH2
+    auth_method = AuthMethod.COOKIE
 
     def __init__(
         self,

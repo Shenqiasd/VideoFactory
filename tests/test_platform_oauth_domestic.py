@@ -784,7 +784,7 @@ class TestXiaohongshuAttributes:
         assert xhs_service.platform == PlatformType.XIAOHONGSHU
 
     def test_auth_method(self, xhs_service):
-        assert xhs_service.auth_method == AuthMethod.OAUTH2
+        assert xhs_service.auth_method == AuthMethod.COOKIE
 
     def test_client_config(self, xhs_service):
         assert xhs_service.client_id == "xhs_test_id"
@@ -996,7 +996,7 @@ class TestWeixinSphAttributes:
         assert weixin_sph_service.platform == PlatformType.WEIXIN_SPH
 
     def test_auth_method(self, weixin_sph_service):
-        assert weixin_sph_service.auth_method == AuthMethod.OAUTH2
+        assert weixin_sph_service.auth_method == AuthMethod.COOKIE
 
     def test_client_config(self, weixin_sph_service):
         assert weixin_sph_service.app_id == "wx_sph_test_appid"
@@ -1207,7 +1207,7 @@ class TestWeixinGzhAttributes:
         assert weixin_gzh_service.platform == PlatformType.WEIXIN_GZH
 
     def test_auth_method(self, weixin_gzh_service):
-        assert weixin_gzh_service.auth_method == AuthMethod.OAUTH2
+        assert weixin_gzh_service.auth_method == AuthMethod.COOKIE
 
     def test_client_config(self, weixin_gzh_service):
         assert weixin_gzh_service.app_id == "wx_gzh_test_appid"

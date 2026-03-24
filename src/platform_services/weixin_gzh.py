@@ -45,7 +45,7 @@ class WeixinGzhService(PlatformService):
     """微信公众号平台服务（Weixin Official Account OAuth2）。"""
 
     platform = PlatformType.WEIXIN_GZH
-    auth_method = AuthMethod.OAUTH2
+    auth_method = AuthMethod.COOKIE
 
     def __init__(
         self,

@@ -82,20 +82,20 @@ def _validate_oauth_state(state: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 ALL_PLATFORMS = [
-    {"platform": "youtube",    "label": "YouTube",   "icon": "youtube",         "color": "#FF0000"},
-    {"platform": "bilibili",   "label": "Bilibili",  "icon": "tv",              "color": "#00A1D6"},
-    {"platform": "tiktok",     "label": "TikTok",    "icon": "music",           "color": "#000000"},
-    {"platform": "douyin",     "label": "抖音",       "icon": "music-2",         "color": "#000000"},
-    {"platform": "facebook",   "label": "Facebook",  "icon": "facebook",        "color": "#1877F2"},
-    {"platform": "instagram",  "label": "Instagram", "icon": "instagram",       "color": "#E4405F"},
-    {"platform": "twitter",    "label": "X (Twitter)","icon": "twitter",        "color": "#000000"},
-    {"platform": "pinterest",  "label": "Pinterest", "icon": "image",           "color": "#BD081C"},
-    {"platform": "linkedin",   "label": "LinkedIn",  "icon": "linkedin",        "color": "#0A66C2"},
-    {"platform": "kwai",       "label": "快手",       "icon": "video",           "color": "#FF4906"},
-    {"platform": "xiaohongshu","label": "小红书",     "icon": "book-open",       "color": "#FE2C55"},
-    {"platform": "weixin_sph", "label": "微信视频号",  "icon": "message-circle", "color": "#07C160"},
-    {"platform": "weixin_gzh", "label": "微信公众号",  "icon": "newspaper",      "color": "#07C160"},
-    {"platform": "threads",    "label": "Threads",   "icon": "at-sign",         "color": "#000000"},
+    {"platform": "youtube",    "label": "YouTube",   "icon": "youtube",         "color": "#FF0000", "auth_type": "oauth2"},
+    {"platform": "bilibili",   "label": "Bilibili",  "icon": "tv",              "color": "#00A1D6", "auth_type": "oauth2"},
+    {"platform": "tiktok",     "label": "TikTok",    "icon": "music",           "color": "#000000", "auth_type": "oauth2"},
+    {"platform": "douyin",     "label": "抖音",       "icon": "music-2",         "color": "#000000", "auth_type": "oauth2"},
+    {"platform": "facebook",   "label": "Facebook",  "icon": "facebook",        "color": "#1877F2", "auth_type": "oauth2"},
+    {"platform": "instagram",  "label": "Instagram", "icon": "instagram",       "color": "#E4405F", "auth_type": "oauth2"},
+    {"platform": "twitter",    "label": "X (Twitter)","icon": "twitter",        "color": "#000000", "auth_type": "oauth2"},
+    {"platform": "pinterest",  "label": "Pinterest", "icon": "image",           "color": "#BD081C", "auth_type": "oauth2"},
+    {"platform": "linkedin",   "label": "LinkedIn",  "icon": "linkedin",        "color": "#0A66C2", "auth_type": "oauth2"},
+    {"platform": "kwai",       "label": "快手",       "icon": "video",           "color": "#FF4906", "auth_type": "oauth2"},
+    {"platform": "xiaohongshu","label": "小红书",     "icon": "book-open",       "color": "#FE2C55", "auth_type": "cookie"},
+    {"platform": "weixin_sph", "label": "微信视频号",  "icon": "message-circle", "color": "#07C160", "auth_type": "cookie"},
+    {"platform": "weixin_gzh", "label": "微信公众号",  "icon": "newspaper",      "color": "#07C160", "auth_type": "cookie"},
+    {"platform": "threads",    "label": "Threads",   "icon": "at-sign",         "color": "#000000", "auth_type": "oauth2"},
 ]
 
 _PLATFORM_LOOKUP = {p["platform"]: p for p in ALL_PLATFORMS}
@@ -117,11 +117,17 @@ async def list_all_platforms():
     registered = {p["platform"] for p in PlatformRegistry.list_platforms()}
     result = []
     for p in ALL_PLATFORMS:
+        # Cookie 平台不需要 OAuth 凭证，始终标记为已配置
+        is_cookie = p.get("auth_type") == "cookie"
         result.append({
             **p,
-            "configured": p["platform"] in registered,
+            "configured": is_cookie or p["platform"] in registered,
         })
     return {"success": True, "data": result}
+
+
+# Cookie 认证平台集合
+COOKIE_AUTH_PLATFORMS = {p["platform"] for p in ALL_PLATFORMS if p.get("auth_type") == "cookie"}
 
 
 @router.post("/connect/{platform}")
@@ -130,7 +136,19 @@ async def connect_platform(platform: str, request: Request):
     发起 OAuth 连接（JSON 模式，用于弹窗流程）。
 
     返回 {auth_url, state} 而非 302 重定向，前端用 window.open() 打开。
+    Cookie 认证平台不支持此接口，返回提示。
     """
+    # Cookie 平台不走 OAuth 流程
+    if platform in COOKIE_AUTH_PLATFORMS:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "detail": f"平台 '{platform}' 使用 Cookie 认证，请使用 Cookie 登录接口",
+                "auth_type": "cookie",
+            },
+        )
+
     service = PlatformRegistry.get(platform)
     if not service:
         return JSONResponse(
@@ -382,3 +400,78 @@ async def delete_account(account_id: str):
     db.delete_platform_account(account_id)
     logger.info("已解绑账号: id=%s, platform=%s", account_id, account["platform"])
     return {"success": True, "message": "账号已解绑"}
+
+
+# ---------------------------------------------------------------------------
+# Cookie 认证接口
+# ---------------------------------------------------------------------------
+
+@router.post("/connect-cookie/{platform}")
+async def connect_cookie(platform: str, request: Request):
+    """
+    通过 Cookie 绑定平台账号（适用于小红书、微信视频号、微信公众号等无公开 OAuth API 的平台）。
+
+    前端提交 JSON: {"cookie_value": "...", "nickname": "可选"}
+    后端保存 Cookie 作为凭证并创建平台账号。
+    """
+    if platform not in COOKIE_AUTH_PLATFORMS:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "detail": f"平台 '{platform}' 不支持 Cookie 认证，请使用 OAuth"},
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "detail": "无效的请求体"},
+        )
+
+    cookie_value = (body.get("cookie_value") or "").strip()
+    if not cookie_value:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "detail": "Cookie 不能为空"},
+        )
+
+    nickname = (body.get("nickname") or "").strip() or f"{platform}_user"
+
+    # 生成账号
+    db = _get_db()
+    platform_meta = _PLATFORM_LOOKUP.get(platform, {})
+    platform_label = platform_meta.get("label", platform)
+
+    account_id = str(uuid.uuid4())
+    db.insert_platform_account({
+        "id": account_id,
+        "platform": platform,
+        "auth_method": "cookie",
+        "platform_uid": f"cookie_{account_id[:8]}",
+        "username": nickname,
+        "nickname": nickname,
+        "avatar_url": "",
+        "status": "active",
+    })
+
+    # 将 Cookie 保存为 OAuth credential（复用 access_token 字段存储 Cookie）
+    import time as _time
+    db.upsert_oauth_credential(
+        account_id=account_id,
+        platform=platform,
+        access_token=cookie_value,
+        refresh_token="",
+        expires_at=int(_time.time()) + 86400 * 30,  # Cookie 默认 30 天有效期
+        refresh_expires_at=None,
+        raw="",
+    )
+
+    logger.info(
+        "Cookie 绑定成功: platform=%s, nickname=%s, account_id=%s",
+        platform, nickname, account_id,
+    )
+    return {
+        "success": True,
+        "message": f"{platform_label} 账号绑定成功",
+        "account_id": account_id,
+    }

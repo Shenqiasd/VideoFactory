@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-AUTH_URI = "https://passport.bilibili.com/register/pc_oauth2.html"
+AUTH_URI = "https://account.bilibili.com/pc/account-pc/auth/oauth"
 TOKEN_URI = "https://api.bilibili.com/x/account-oauth2/v1/token"
 REFRESH_URI = "https://api.bilibili.com/x/account-oauth2/v1/refresh_token"
 USER_INFO_URI = "https://member.bilibili.com/x2/creative/h5/upload/member/info"

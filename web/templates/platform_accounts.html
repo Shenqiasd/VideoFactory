@@ -103,7 +103,7 @@
                         <i data-lucide="x" class="w-4 h-4 text-fg-sub"></i>
                     </button>
                 </div>
-                <p class="text-[13px] text-fg-sub mb-5">选择要连接的平台，将自动跳转到平台授权页面</p>
+                <p class="text-[13px] text-fg-sub mb-5">选择要连接的平台，OAuth 平台将自动跳转授权，Cookie 平台需手动粘贴 Cookie</p>
                 <div class="grid grid-cols-3 sm:grid-cols-4 gap-3">
                     <template x-for="p in allPlatforms" :key="p.platform">
                         <button @click="startConnect(p)"
@@ -120,7 +120,62 @@
                         </button>
                     </template>
                 </div>
-                <p class="text-[11px] text-fg-faint mt-4 text-center">标记「未配置」的平台需要管理员在 <a href="/settings" class="text-blue-500 hover:underline">设置 → OAuth 平台</a> 或 Railway 环境变量中配置密钥</p>
+                <p class="text-[11px] text-fg-faint mt-4 text-center">标记「未配置」的 OAuth 平台需要管理员在 <a href="/settings" class="text-blue-500 hover:underline">设置 → OAuth 平台</a> 或 Railway 环境变量中配置密钥；Cookie 平台无需配置</p>
+            </div>
+        </div>
+    </template>
+
+    <!-- Cookie Login Modal -->
+    <template x-if="showCookieModal">
+        <div class="fixed inset-0 z-50 flex items-center justify-center" @keydown.escape.window="closeCookieModal()">
+            <div class="absolute inset-0 bg-black/40" @click="closeCookieModal()"></div>
+            <div class="relative bg-white rounded-3xl shadow-2xl w-[520px] max-h-[80vh] overflow-y-auto p-6 z-10">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center"
+                             :style="'background:' + (cookiePlatform.color || '#888') + '12; color:' + (cookiePlatform.color || '#888')">
+                            <i :data-lucide="cookiePlatform.icon || 'globe'" class="w-5 h-5"></i>
+                        </div>
+                        <h3 class="text-[17px] font-semibold text-fg-strong">Cookie 登录 <span x-text="cookiePlatform.label"></span></h3>
+                    </div>
+                    <button @click="closeCookieModal()" class="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-muted transition">
+                        <i data-lucide="x" class="w-4 h-4 text-fg-sub"></i>
+                    </button>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 rounded-2xl p-3 mb-4">
+                    <p class="text-[12px] text-amber-700">
+                        <strong>提示：</strong>该平台无公开 OAuth API，需通过浏览器 Cookie 登录。Cookie 有效期有限，过期后需重新粘贴。
+                    </p>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">昵称（可选）</label>
+                        <input type="text" x-model="cookieNickname"
+                               class="w-full px-3 py-2 rounded-xl border border-border text-[13px] focus:outline-none focus:ring-2 focus:ring-black/10"
+                               :placeholder="cookiePlatform.label + ' 账号昵称'">
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-medium text-fg-strong mb-1.5">Cookie 内容</label>
+                        <textarea x-model="cookieValue" rows="6"
+                                  class="w-full px-3 py-2 rounded-xl border border-border text-[12px] font-mono focus:outline-none focus:ring-2 focus:ring-black/10 resize-none"
+                                  placeholder="从浏览器开发者工具 (F12) → Application → Cookies 复制全部 Cookie，或粘贴浏览器扩展导出的 JSON..."></textarea>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 mt-5">
+                    <button @click="closeCookieModal()"
+                            class="px-4 py-2 rounded-2xl border border-border text-[13px] text-fg hover:bg-muted transition">
+                        取消
+                    </button>
+                    <button @click="submitCookie()"
+                            :disabled="cookieSubmitting || !cookieValue.trim()"
+                            class="px-4 py-2 rounded-2xl bg-black text-white text-[13px] font-medium hover:bg-fg-strong transition disabled:opacity-50">
+                        <span x-show="!cookieSubmitting">确认绑定</span>
+                        <span x-show="cookieSubmitting">绑定中...</span>
+                    </button>
+                </div>
             </div>
         </div>
     </template>
@@ -187,6 +242,13 @@ function platformAccounts() {
         pollTimer: null,
         authWindow: null,
 
+        // Cookie login state
+        showCookieModal: false,
+        cookiePlatform: {},
+        cookieNickname: '',
+        cookieValue: '',
+        cookieSubmitting: false,
+
         async init() {
             await Promise.all([this.loadAllPlatforms(), this.loadAccounts()]);
             this.loading = false;
@@ -233,6 +295,18 @@ function platformAccounts() {
             if (!platform.configured) {
                 this.showToast('该平台尚未配置 OAuth 密钥，正在跳转到设置页面…', 'error');
                 setTimeout(function() { window.location.href = '/settings'; }, 1200);
+                return;
+            }
+
+            // Cookie 平台走单独流程
+            if (platform.auth_type === 'cookie') {
+                this.showConnectModal = false;
+                this.cookiePlatform = platform;
+                this.cookieNickname = '';
+                this.cookieValue = '';
+                this.cookieSubmitting = false;
+                this.showCookieModal = true;
+                this.$nextTick(function() { safeCreateIcons(); });
                 return;
             }
 
@@ -390,6 +464,44 @@ function platformAccounts() {
             var meta = this.allPlatforms.find(function(x) { return x.platform === p; });
             if (meta) return meta.color;
             return '#888';
+        },
+
+        closeCookieModal() {
+            this.showCookieModal = false;
+            this.cookiePlatform = {};
+            this.cookieNickname = '';
+            this.cookieValue = '';
+        },
+
+        async submitCookie() {
+            if (!this.cookieValue.trim()) return;
+            this.cookieSubmitting = true;
+            try {
+                var resp = await fetch('/api/oauth/connect-cookie/' + this.cookiePlatform.platform, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cookie_value: this.cookieValue.trim(),
+                        nickname: this.cookieNickname.trim() || undefined,
+                    }),
+                });
+                var data = await resp.json();
+                if (data.success) {
+                    this.closeCookieModal();
+                    this.showToast(data.message || '账号绑定成功！', 'success');
+                    var self = this;
+                    this.loadAccounts().then(function() {
+                        self.$nextTick(function() { safeCreateIcons(); });
+                    });
+                } else {
+                    this.showToast(data.detail || '绑定失败', 'error');
+                }
+            } catch (e) {
+                console.error('Cookie submit error:', e);
+                this.showToast('Cookie 绑定失败', 'error');
+            } finally {
+                this.cookieSubmitting = false;
+            }
         },
 
         formatCountdown(seconds) {
