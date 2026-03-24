@@ -253,7 +253,7 @@ function platformAccounts() {
                     popup.location.href = data.auth_url;
                 } else {
                     // 弹窗被拦截时回退到当前窗口跳转
-                    window.open(data.auth_url, 'oauth_popup', 'width=600,height=700,scrollbars=yes');
+                    popup = window.open(data.auth_url, 'oauth_popup', 'width=600,height=700,scrollbars=yes');
                 }
                 this.authWindow = popup;
                 this.connectState = data.state;
