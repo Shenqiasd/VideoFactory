@@ -407,20 +407,21 @@ async def storage_page(request: Request):
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    """Login page — redirects to /register if no users exist (bootstrap)."""
+    """Auth page (login tab) — combined login/register with client-side tab switching."""
     if not auth_enabled():
+        # No users yet — redirect to /register so JS picks up register tab
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/register", status_code=302)
-    return render_template(request, "login.html")
+    return render_template(request, "auth.html")
 
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    """Registration page — only accessible when registration is allowed."""
+    """Auth page (register tab) — combined login/register with client-side tab switching."""
     if not registration_allowed():
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/login", status_code=302)
-    return render_template(request, "register.html")
+    return render_template(request, "auth.html")
 
 
 @router.get("/settings", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
