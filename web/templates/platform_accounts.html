@@ -236,15 +236,26 @@ function platformAccounts() {
                 return;
             }
 
+            // 必须在 click 事件同步链中打开弹窗，否则会被浏览器拦截
+            var popup = window.open('about:blank', 'oauth_popup', 'width=600,height=700,scrollbars=yes');
+
             try {
                 var resp = await fetch('/api/oauth/connect/' + platform.platform, { method: 'POST' });
                 var data = await resp.json();
                 if (!data.success) {
+                    if (popup) popup.close();
                     this.showToast(data.detail || '发起授权失败', 'error');
                     return;
                 }
 
-                this.authWindow = window.open(data.auth_url, 'oauth_popup', 'width=600,height=700,scrollbars=yes');
+                // 将已打开的空白弹窗导航到授权 URL
+                if (popup && !popup.closed) {
+                    popup.location.href = data.auth_url;
+                } else {
+                    // 弹窗被拦截时回退到当前窗口跳转
+                    popup = window.open(data.auth_url, 'oauth_popup', 'width=600,height=700,scrollbars=yes');
+                }
+                this.authWindow = popup;
                 this.connectState = data.state;
                 this.connectingPlatform = platform;
                 this.showConnectModal = false;
@@ -270,6 +281,7 @@ function platformAccounts() {
 
             } catch (e) {
                 console.error('Connect error:', e);
+                if (popup && !popup.closed) popup.close();
                 this.showToast('发起授权失败', 'error');
             }
         },
