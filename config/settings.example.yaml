@@ -128,37 +128,83 @@ monitor:
 
 # 多平台 OAuth 配置
 # 每个平台需要在对应开放平台注册应用后填入 client_id / client_secret
+# 只有配置了密钥的平台才会在启动时注册并可用
 oauth:
   # OAuth 回调基础 URL（部署后需改为实际域名）
   callback_base_url: "http://localhost:9000"
+
+  # --- 国际平台 ---
   youtube:
     client_id: ""
     client_secret: ""
-    # 需要在 Google Cloud Console 创建 OAuth 2.0 凭据
+    # Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID
     # 重定向 URI: {callback_base_url}/api/oauth/callback/youtube
-  bilibili:
-    client_id: ""
-    client_secret: ""
-    # 需要在 Bilibili 开放平台注册应用
   tiktok:
     client_id: ""
     client_secret: ""
-  douyin:
-    client_id: ""
-    client_secret: ""
+    # TikTok Developer Portal → Manage apps
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/tiktok
   facebook:
     app_id: ""
     app_secret: ""
+    # Meta for Developers → My Apps → 应用设置 → 基本
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/facebook
   instagram:
-    # 使用 Facebook App 的凭据
+    # 使用 Facebook App 的凭据（需要 Instagram Business 账号关联到 Facebook Page）
     app_id: ""
     app_secret: ""
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/instagram
+  threads:
+    # 使用 Meta/Threads API 凭据
+    app_id: ""
+    app_secret: ""
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/threads
   twitter:
     client_id: ""
     client_secret: ""
+    # Twitter Developer Portal → Projects & Apps → OAuth 2.0
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/twitter
   pinterest:
     client_id: ""
     client_secret: ""
+    # Pinterest Developer → My Apps
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/pinterest
   linkedin:
     client_id: ""
     client_secret: ""
+    # LinkedIn Developer → My Apps → Auth
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/linkedin
+
+  # --- 国内平台 ---
+  bilibili:
+    client_id: ""
+    client_secret: ""
+    # Bilibili 开放平台 → 应用管理
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/bilibili
+  douyin:
+    client_id: ""
+    client_secret: ""
+    # 抖音开放平台 → 应用管理（client_id 即 client_key）
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/douyin
+  kwai:
+    client_id: ""
+    client_secret: ""
+    # 快手开放平台 → 应用管理（client_id 即 app_id）
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/kwai
+  xiaohongshu:
+    client_id: ""
+    client_secret: ""
+    # 小红书开放平台 → 应用管理
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/xiaohongshu
+  weixin_sph:
+    # 微信视频号（Channels）
+    app_id: ""
+    app_secret: ""
+    # 微信开放平台 → 管理中心 → 网站应用
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/weixin_sph
+  weixin_gzh:
+    # 微信公众号（Official Account）
+    app_id: ""
+    app_secret: ""
+    # 微信公众平台 → 开发 → 基本配置
+    # 重定向 URI: {callback_base_url}/api/oauth/callback/weixin_gzh
