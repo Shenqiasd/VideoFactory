@@ -468,7 +468,7 @@ async def connect_cookie(platform: str, request: Request):
         "id": account_id,
         "platform": platform,
         "auth_method": "cookie",
-        "platform_uid": f"cookie_{account_id[:8]}",
+        "platform_uid": f"cookie_{account_id}",
         "username": nickname,
         "nickname": nickname,
         "avatar_url": "",
