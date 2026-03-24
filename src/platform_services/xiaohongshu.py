@@ -44,7 +44,7 @@ class XiaohongshuService(PlatformService):
     """小红书平台服务（Xiaohongshu Open Platform OAuth2）。"""
 
     platform = PlatformType.XIAOHONGSHU
-    auth_method = AuthMethod.OAUTH2
+    auth_method = AuthMethod.COOKIE
 
     def __init__(
         self,
