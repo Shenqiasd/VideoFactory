@@ -130,6 +130,13 @@ async def list_all_platforms():
 # Cookie 认证平台集合
 COOKIE_AUTH_PLATFORMS = {p["platform"] for p in ALL_PLATFORMS if p.get("auth_type") == "cookie"}
 
+# Cookie 平台默认有效期（秒）— 与各平台实际 Cookie 生命周期对齐
+_COOKIE_TTL = {
+    "xiaohongshu": 86400,      # ~24h（a1 字段）
+    "weixin_sph":  86400,      # ~24h
+    "weixin_gzh":  86400 * 2,  # ~48h（公众号 Cookie 略长）
+}
+
 
 @router.post("/connect/{platform}")
 async def connect_platform(platform: str, request: Request):
@@ -474,7 +481,7 @@ async def connect_cookie(platform: str, request: Request):
         platform=platform,
         access_token=cookie_value,
         refresh_token="",
-        expires_at=int(time.time()) + 86400 * 30,  # Cookie 默认 30 天有效期
+        expires_at=int(time.time()) + _COOKIE_TTL.get(platform, 86400),  # 与平台实际 Cookie 有效期对齐
         refresh_expires_at=None,
         raw="",
     )
