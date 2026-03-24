@@ -169,13 +169,10 @@ def auth_enabled() -> bool:
 
 def registration_allowed() -> bool:
     """
-    Registration is allowed when:
-    - No users exist (bootstrap first user), OR
-    - VF_ALLOW_REGISTRATION env var is set to 'true'
+    Registration is allowed by default. Set VF_ALLOW_REGISTRATION=false to disable.
     """
-    if user_count() == 0:
-        return True
-    return os.environ.get("VF_ALLOW_REGISTRATION", "").strip().lower() == "true"
+    val = os.environ.get("VF_ALLOW_REGISTRATION", "true").strip().lower()
+    return val != "false"
 
 
 # ---------------------------------------------------------------------------

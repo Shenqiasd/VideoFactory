@@ -159,16 +159,8 @@
             registrationAllowed = false;
         }
 
-        // Show/hide tab bar and decide which tab to show
-        const tabBar = document.getElementById('tab-bar');
-        if (registrationAllowed) {
-            tabBar.classList.remove('hidden');
-            switchTab(initialMode);
-        } else {
-            // Registration not allowed — hide tab bar, force login
-            tabBar.classList.add('hidden');
-            switchTab('login');
-        }
+        // Always show tab bar — both login and register tabs are always visible
+        switchTab(initialMode);
     })();
 
     // -----------------------------------------------------------------------
