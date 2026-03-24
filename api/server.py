@@ -76,7 +76,7 @@ def register_platform_services() -> int:
 
     PlatformRegistry.clear()
 
-    env_callback = os.environ.get("OAUTH_CALLBACK_BASE_URL", "")
+    env_callback = os.environ.get("OAUTH_CALLBACK_BASE_URL", "").strip().rstrip("/")
     yaml_callback = config.get("oauth", "callback_base_url", default="http://localhost:9000")
     callback_base = env_callback or yaml_callback
 

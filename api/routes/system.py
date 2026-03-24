@@ -1087,7 +1087,7 @@ async def get_oauth_settings():
     config_data = _read_yaml_config()
     oauth: dict = config_data.get("oauth") or {}
 
-    env_callback = os.environ.get("OAUTH_CALLBACK_BASE_URL", "")
+    env_callback = os.environ.get("OAUTH_CALLBACK_BASE_URL", "").strip().rstrip("/")
     yaml_callback = oauth.get("callback_base_url", "http://localhost:9000")
     callback_base_url = env_callback or yaml_callback
 
