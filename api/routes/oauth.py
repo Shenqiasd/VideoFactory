@@ -16,6 +16,7 @@ OAuth 认证路由 — 多平台统一 OAuth 流程。
 import json
 import logging
 import secrets
+import time
 import uuid
 from html import escape
 from typing import Optional
@@ -190,6 +191,17 @@ async def authorize(platform: str, request: Request):
 
     前端将用户重定向到此端点，后端生成平台 OAuth URL 并 302 重定向。
     """
+    # Cookie 平台不走 OAuth 流程
+    if platform in COOKIE_AUTH_PLATFORMS:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "detail": f"平台 '{platform}' 使用 Cookie 认证，请使用 Cookie 登录接口",
+                "auth_type": "cookie",
+            },
+        )
+
     service = PlatformRegistry.get(platform)
     if not service:
         return JSONResponse(
@@ -422,6 +434,8 @@ async def connect_cookie(platform: str, request: Request):
 
     try:
         body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("expected JSON object")
     except Exception:
         return JSONResponse(
             status_code=400,
@@ -455,13 +469,12 @@ async def connect_cookie(platform: str, request: Request):
     })
 
     # 将 Cookie 保存为 OAuth credential（复用 access_token 字段存储 Cookie）
-    import time as _time
     db.upsert_oauth_credential(
         account_id=account_id,
         platform=platform,
         access_token=cookie_value,
         refresh_token="",
-        expires_at=int(_time.time()) + 86400 * 30,  # Cookie 默认 30 天有效期
+        expires_at=int(time.time()) + 86400 * 30,  # Cookie 默认 30 天有效期
         refresh_expires_at=None,
         raw="",
     )
