@@ -169,10 +169,16 @@ def auth_enabled() -> bool:
 
 def registration_allowed() -> bool:
     """
-    Registration is allowed by default. Set VF_ALLOW_REGISTRATION=false to disable.
+    Registration policy:
+    - VF_ALLOW_REGISTRATION not set → allow only when no users exist (bootstrap)
+    - VF_ALLOW_REGISTRATION=true   → always allow
+    - VF_ALLOW_REGISTRATION=false  → never allow
     """
-    val = os.environ.get("VF_ALLOW_REGISTRATION", "true").strip().lower()
-    return val != "false"
+    val = os.environ.get("VF_ALLOW_REGISTRATION", "").strip().lower()
+    if val == "":
+        # Not explicitly configured: allow only when no users exist (bootstrap)
+        return user_count() == 0
+    return val not in ("false", "0", "no", "off")
 
 
 # ---------------------------------------------------------------------------
