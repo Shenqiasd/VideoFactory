@@ -1071,6 +1071,276 @@ _OAUTH_PLATFORM_FIELDS: dict[str, tuple[str, str]] = {
     "threads":      ("app_id",    "app_secret"),
 }
 
+# 每个平台的详细配置引导元数据
+_OAUTH_PLATFORM_GUIDES: dict[str, dict] = {
+    "youtube": {
+        "name": "YouTube",
+        "icon": "youtube",
+        "color": "#FF0000",
+        "group": "international",
+        "auth_method": "OAuth 2.0",
+        "scopes": "YouTube Data API v3 (上传、管理视频)",
+        "dev_portal_url": "https://console.cloud.google.com/apis/credentials",
+        "dev_portal_name": "Google Cloud Console",
+        "env_vars": ["OAUTH_YOUTUBE_CLIENT_ID", "OAUTH_YOUTUBE_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往 Google Cloud Console (console.cloud.google.com)，创建或选择项目",
+            "在「API 和服务」→「库」中启用 YouTube Data API v3",
+            "进入「API 和服务」→「凭据」→ 创建 OAuth 2.0 客户端 ID",
+            "应用类型选择「Web 应用」，添加授权重定向 URI：{callback_url}/api/oauth/callback/youtube",
+            "复制 Client ID 和 Client Secret 填入下方或设置环境变量",
+        ],
+        "notes": "需要 Google 账号，免费配额足够个人使用。首次使用需配置 OAuth 同意屏幕。",
+    },
+    "bilibili": {
+        "name": "Bilibili",
+        "icon": "tv",
+        "color": "#00A1D6",
+        "group": "domestic",
+        "auth_method": "OAuth 2.0",
+        "scopes": "视频上传、用户信息",
+        "dev_portal_url": "https://openhome.bilibili.com/",
+        "dev_portal_name": "Bilibili 开放平台",
+        "env_vars": ["OAUTH_BILIBILI_CLIENT_ID", "OAUTH_BILIBILI_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往 Bilibili 开放平台 (openhome.bilibili.com) 注册开发者账号",
+            "创建应用，选择「网站应用」类型",
+            "在应用设置中配置回调地址：{callback_url}/api/oauth/callback/bilibili",
+            "获取应用的 Client ID（AppKey）和 Client Secret（AppSecret）",
+            "将凭证填入下方或设置环境变量",
+        ],
+        "notes": "需要 Bilibili 账号并完成实名认证。审核通过后才能使用 OAuth。",
+    },
+    "tiktok": {
+        "name": "TikTok",
+        "icon": "music",
+        "color": "#000000",
+        "group": "international",
+        "auth_method": "OAuth 2.0",
+        "scopes": "user.info.basic, video.publish, video.upload",
+        "dev_portal_url": "https://developers.tiktok.com/apps/",
+        "dev_portal_name": "TikTok Developer Portal",
+        "env_vars": ["OAUTH_TIKTOK_CLIENT_ID", "OAUTH_TIKTOK_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往 TikTok Developer Portal (developers.tiktok.com) 注册开发者账号",
+            "创建应用，在「Manage apps」中点击「Create」",
+            "申请所需权限：Login Kit、Content Posting API",
+            "在「Configuration」中添加回调 URL：{callback_url}/api/oauth/callback/tiktok",
+            "获取 Client Key 和 Client Secret（注意：TikTok 使用 client_key 而非 client_id）",
+        ],
+        "notes": "TikTok 开发者账号需审核，Content Posting API 需单独申请权限。审核周期约 1-3 个工作日。",
+    },
+    "douyin": {
+        "name": "抖音",
+        "icon": "music-2",
+        "color": "#000000",
+        "group": "domestic",
+        "auth_method": "OAuth 2.0",
+        "scopes": "user_info, video.create, video.data",
+        "dev_portal_url": "https://open.douyin.com/platform/resource/docs/openapi/account-permission/toutiao-platform-redirect",
+        "dev_portal_name": "抖音开放平台",
+        "env_vars": ["OAUTH_DOUYIN_CLIENT_ID", "OAUTH_DOUYIN_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往抖音开放平台 (open.douyin.com) 注册开发者账号",
+            "在「应用管理」中创建应用，选择「网站应用」",
+            "申请所需能力：账号授权、视频管理",
+            "在应用详情中配置回调地址：{callback_url}/api/oauth/callback/douyin",
+            "获取 Client Key（即 client_id）和 Client Secret",
+        ],
+        "notes": "抖音使用 client_key（不是 client_id），系统已自动映射。需企业资质或个人开发者认证。",
+    },
+    "facebook": {
+        "name": "Facebook",
+        "icon": "facebook",
+        "color": "#1877F2",
+        "group": "international",
+        "auth_method": "OAuth 2.0 (Meta)",
+        "scopes": "pages_manage_posts, pages_read_engagement, publish_video",
+        "dev_portal_url": "https://developers.facebook.com/apps/",
+        "dev_portal_name": "Meta for Developers",
+        "env_vars": ["OAUTH_FACEBOOK_APP_ID", "OAUTH_FACEBOOK_APP_SECRET"],
+        "guide_steps": [
+            "前往 Meta for Developers (developers.facebook.com) 登录",
+            "在「My Apps」中创建应用，选择「Business」类型",
+            "进入应用设置 →「基本」，获取 App ID 和 App Secret",
+            "添加「Facebook Login」产品，设置有效的 OAuth 重定向 URI：{callback_url}/api/oauth/callback/facebook",
+            "在「权限和功能」中申请 pages_manage_posts 和 publish_video 权限",
+        ],
+        "notes": "发布到 Facebook Page（非个人主页）。需要拥有 Facebook Page 并完成 App Review。",
+    },
+    "instagram": {
+        "name": "Instagram",
+        "icon": "instagram",
+        "color": "#E4405F",
+        "group": "international",
+        "auth_method": "OAuth 2.0 (Meta)",
+        "scopes": "instagram_basic, instagram_content_publish",
+        "dev_portal_url": "https://developers.facebook.com/apps/",
+        "dev_portal_name": "Meta for Developers",
+        "env_vars": ["OAUTH_INSTAGRAM_APP_ID", "OAUTH_INSTAGRAM_APP_SECRET"],
+        "guide_steps": [
+            "使用与 Facebook 相同的 Meta 开发者平台，创建或复用现有应用",
+            "添加「Instagram Basic Display」和「Instagram Graph API」产品",
+            "确保 Instagram 账号已转换为 Business 或 Creator 账号，并关联到 Facebook Page",
+            "在 OAuth 设置中添加回调 URI：{callback_url}/api/oauth/callback/instagram",
+            "获取 App ID 和 App Secret（与 Facebook App 相同的凭据）",
+        ],
+        "notes": "必须是 Instagram Business/Creator 账号，且关联 Facebook Page。使用容器模式发布视频。",
+    },
+    "twitter": {
+        "name": "X (Twitter)",
+        "icon": "twitter",
+        "color": "#000000",
+        "group": "international",
+        "auth_method": "OAuth 2.0 with PKCE",
+        "scopes": "tweet.read, tweet.write, users.read, offline.access",
+        "dev_portal_url": "https://developer.twitter.com/en/portal/dashboard",
+        "dev_portal_name": "Twitter Developer Portal",
+        "env_vars": ["OAUTH_TWITTER_CLIENT_ID", "OAUTH_TWITTER_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往 Twitter Developer Portal (developer.twitter.com) 申请开发者账号",
+            "在 Dashboard 中创建 Project 和 App",
+            "进入 App 的「User authentication settings」，启用 OAuth 2.0",
+            "设置回调 URL：{callback_url}/api/oauth/callback/twitter",
+            "获取 Client ID 和 Client Secret（OAuth 2.0 凭据）",
+        ],
+        "notes": "Twitter 使用 OAuth 2.0 + PKCE 模式，系统已自动处理 PKCE 流程。Free 计划有发推限制。",
+    },
+    "pinterest": {
+        "name": "Pinterest",
+        "icon": "image",
+        "color": "#BD081C",
+        "group": "international",
+        "auth_method": "OAuth 2.0",
+        "scopes": "boards:read, pins:read, pins:write",
+        "dev_portal_url": "https://developers.pinterest.com/apps/",
+        "dev_portal_name": "Pinterest Developer",
+        "env_vars": ["OAUTH_PINTEREST_CLIENT_ID", "OAUTH_PINTEREST_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往 Pinterest Developer (developers.pinterest.com) 注册开发者账号",
+            "在「My Apps」中创建应用",
+            "在应用设置中配置回调 URL：{callback_url}/api/oauth/callback/pinterest",
+            "获取 App ID 和 App Secret",
+            "如需发布视频 Pin，需申请 pins:write 权限",
+        ],
+        "notes": "Pinterest 开发者权限需审核，视频 Pin 功能可能需要额外申请。",
+    },
+    "linkedin": {
+        "name": "LinkedIn",
+        "icon": "linkedin",
+        "color": "#0A66C2",
+        "group": "international",
+        "auth_method": "OAuth 2.0",
+        "scopes": "w_member_social, r_liteprofile",
+        "dev_portal_url": "https://www.linkedin.com/developers/apps",
+        "dev_portal_name": "LinkedIn Developer",
+        "env_vars": ["OAUTH_LINKEDIN_CLIENT_ID", "OAUTH_LINKEDIN_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往 LinkedIn Developer (linkedin.com/developers) 创建应用",
+            "在「Auth」标签页中配置回调 URL：{callback_url}/api/oauth/callback/linkedin",
+            "申请所需的 OAuth 2.0 权限范围（w_member_social 用于发布）",
+            "获取 Client ID 和 Client Secret",
+            "如需代表 Company Page 发布，还需申请 Marketing Developer Platform 权限",
+        ],
+        "notes": "个人发布使用 w_member_social，公司主页发布需额外 API 权限申请。",
+    },
+    "kwai": {
+        "name": "快手",
+        "icon": "video",
+        "color": "#FF4906",
+        "group": "domestic",
+        "auth_method": "OAuth 2.0",
+        "scopes": "user_info, video_publish",
+        "dev_portal_url": "https://open.kuaishou.com/",
+        "dev_portal_name": "快手开放平台",
+        "env_vars": ["OAUTH_KWAI_CLIENT_ID", "OAUTH_KWAI_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往快手开放平台 (open.kuaishou.com) 注册开发者账号",
+            "在「应用管理」中创建应用",
+            "配置回调地址：{callback_url}/api/oauth/callback/kwai",
+            "获取 App ID 和 App Secret",
+            "申请所需能力：用户信息、视频发布",
+        ],
+        "notes": "快手使用 app_id 参数名（系统已自动映射为 client_id）。需企业资质。",
+    },
+    "xiaohongshu": {
+        "name": "小红书",
+        "icon": "book-open",
+        "color": "#FE2C55",
+        "group": "domestic",
+        "auth_method": "OAuth 2.0",
+        "scopes": "用户信息、笔记发布",
+        "dev_portal_url": "https://open.xiaohongshu.com/",
+        "dev_portal_name": "小红书开放平台",
+        "env_vars": ["OAUTH_XIAOHONGSHU_CLIENT_ID", "OAUTH_XIAOHONGSHU_CLIENT_SECRET"],
+        "guide_steps": [
+            "前往小红书开放平台 (open.xiaohongshu.com) 注册开发者账号",
+            "在「应用管理」中创建应用",
+            "配置回调地址：{callback_url}/api/oauth/callback/xiaohongshu",
+            "获取 App Key 和 App Secret",
+            "申请所需接口权限：账号授权、内容发布",
+        ],
+        "notes": "小红书开放平台目前主要面向企业开发者，个人开发者可能需要额外审核。",
+    },
+    "weixin_sph": {
+        "name": "微信视频号",
+        "icon": "message-circle",
+        "color": "#07C160",
+        "group": "domestic",
+        "auth_method": "OAuth 2.0 (微信开放平台)",
+        "scopes": "snsapi_userinfo",
+        "dev_portal_url": "https://open.weixin.qq.com/",
+        "dev_portal_name": "微信开放平台",
+        "env_vars": ["OAUTH_WEIXIN_SPH_APP_ID", "OAUTH_WEIXIN_SPH_APP_SECRET"],
+        "guide_steps": [
+            "前往微信开放平台 (open.weixin.qq.com) 注册开发者账号",
+            "在「管理中心」→「网站应用」中创建应用",
+            "配置回调域名（注意：微信要求域名，不支持 IP 或 localhost）",
+            "获取 AppID 和 AppSecret",
+            "完成应用审核后即可使用 OAuth 授权",
+        ],
+        "notes": "微信视频号 API 发布功能仅对部分合作伙伴开放，OAuth 授权可用于获取用户信息。需使用已备案域名。",
+    },
+    "weixin_gzh": {
+        "name": "微信公众号",
+        "icon": "newspaper",
+        "color": "#07C160",
+        "group": "domestic",
+        "auth_method": "OAuth 2.0 (微信公众平台)",
+        "scopes": "snsapi_userinfo",
+        "dev_portal_url": "https://mp.weixin.qq.com/",
+        "dev_portal_name": "微信公众平台",
+        "env_vars": ["OAUTH_WEIXIN_GZH_APP_ID", "OAUTH_WEIXIN_GZH_APP_SECRET"],
+        "guide_steps": [
+            "前往微信公众平台 (mp.weixin.qq.com) 登录公众号后台",
+            "进入「开发」→「基本配置」获取 AppID 和 AppSecret",
+            "在「开发」→「接口权限」中确认已开通网页授权",
+            "在公众号设置 →「功能设置」中配置网页授权域名",
+            "注意：回调域名需备案且与配置域名一致",
+        ],
+        "notes": "需认证的服务号才支持网页授权。订阅号不支持 OAuth。域名需 ICP 备案。",
+    },
+    "threads": {
+        "name": "Threads",
+        "icon": "at-sign",
+        "color": "#000000",
+        "group": "international",
+        "auth_method": "OAuth 2.0 (Meta)",
+        "scopes": "threads_basic, threads_content_publish",
+        "dev_portal_url": "https://developers.facebook.com/apps/",
+        "dev_portal_name": "Meta for Developers",
+        "env_vars": ["OAUTH_THREADS_APP_ID", "OAUTH_THREADS_APP_SECRET"],
+        "guide_steps": [
+            "使用 Meta 开发者平台，创建或复用现有 Facebook 应用",
+            "在应用中添加「Threads API」产品",
+            "配置 OAuth 回调 URI：{callback_url}/api/oauth/callback/threads",
+            "获取 App ID 和 App Secret",
+            "申请 threads_basic 和 threads_content_publish 权限",
+        ],
+        "notes": "Threads API 相对较新（2024 年开放），使用 Meta 统一认证体系。需通过 App Review。",
+    },
+}
+
 _MASK = "****"
 
 
@@ -1081,7 +1351,7 @@ class OAuthSettingsRequest(BaseModel):
 
 @router.get("/settings/oauth", dependencies=[Depends(require_auth)])
 async def get_oauth_settings():
-    """读取 OAuth 配置（密钥脱敏），同时检查环境变量。"""
+    """读取 OAuth 配置（密钥脱敏），同时返回平台配置引导元数据。"""
     from api.server import _env_oauth
 
     config_data = _read_yaml_config()
@@ -1091,7 +1361,7 @@ async def get_oauth_settings():
     yaml_callback = oauth.get("callback_base_url", "http://localhost:9000")
     callback_base_url = env_callback or yaml_callback
 
-    platforms: dict[str, dict[str, str]] = {}
+    platforms: dict[str, dict] = {}
     for plat, (id_key, sec_key) in _OAUTH_PLATFORM_FIELDS.items():
         # 检查环境变量
         env_id, env_sec = _env_oauth(plat, id_key, sec_key)
@@ -1109,12 +1379,29 @@ async def get_oauth_settings():
             display_id = (_MASK + raw_id[-4:]) if raw_id else ""
             display_sec = (_MASK + raw_sec[-4:]) if raw_sec else ""
 
+        # 合并字段信息与配置引导
+        guide = _OAUTH_PLATFORM_GUIDES.get(plat, {})
         platforms[plat] = {
             "id_field": id_key,
             "secret_field": sec_key,
             "id_value": display_id,
             "secret_value": display_sec,
             "from_env": from_env,
+            # 配置引导元数据
+            "name": guide.get("name", plat),
+            "icon": guide.get("icon", ""),
+            "color": guide.get("color", "#888"),
+            "group": guide.get("group", "international"),
+            "auth_method": guide.get("auth_method", "OAuth 2.0"),
+            "scopes": guide.get("scopes", ""),
+            "dev_portal_url": guide.get("dev_portal_url", ""),
+            "dev_portal_name": guide.get("dev_portal_name", ""),
+            "env_vars": guide.get("env_vars", []),
+            "guide_steps": [
+                s.replace("{callback_url}", callback_base_url)
+                for s in guide.get("guide_steps", [])
+            ],
+            "notes": guide.get("notes", ""),
         }
 
     return {
