@@ -114,13 +114,16 @@
                                 <i :data-lucide="p.icon" class="w-5 h-5"></i>
                             </div>
                             <span class="text-[12px] text-fg-sub group-hover:text-fg-strong transition-colors" x-text="p.label"></span>
-                            <template x-if="!p.configured">
+                            <template x-if="p.auth === 'plugin'">
+                                <span class="absolute top-1.5 right-1.5 text-[9px] text-orange-500">插件</span>
+                            </template>
+                            <template x-if="p.auth !== 'plugin' && !p.configured">
                                 <span class="absolute top-1.5 right-1.5 text-[9px] text-fg-faint">未配置</span>
                             </template>
                         </button>
                     </template>
                 </div>
-                <p class="text-[11px] text-fg-faint mt-4 text-center">标记「未配置」的平台需要管理员在 <a href="/settings" class="text-blue-500 hover:underline">设置 → OAuth 平台</a> 或 Railway 环境变量中配置密钥</p>
+                <p class="text-[11px] text-fg-faint mt-4 text-center">标记「未配置」的平台需管理员通过环境变量配置（如 <code class="bg-muted px-1 rounded">OAUTH_YOUTUBE_CLIENT_ID</code>）</p>
             </div>
         </div>
     </template>
@@ -230,9 +233,14 @@ function platformAccounts() {
         },
 
         async startConnect(platform) {
+            // 插件类平台（如小红书）提示使用浏览器插件
+            if (platform.auth === 'plugin') {
+                this.showToast(platform.label + ' 使用浏览器插件方案登录，请安装对应插件', 'error');
+                return;
+            }
+            // 未配置环境变量的平台提示管理员配置
             if (!platform.configured) {
-                this.showToast('该平台尚未配置 OAuth 密钥，正在跳转到设置页面…', 'error');
-                setTimeout(function() { window.location.href = '/settings'; }, 1200);
+                this.showToast('该平台尚未配置，请联系管理员配置环境变量 OAUTH_' + platform.platform.toUpperCase() + '_*', 'error');
                 return;
             }
 
