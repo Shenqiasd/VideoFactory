@@ -48,6 +48,172 @@ from core.scheduler import StorageCleanupScheduler
 logger = logging.getLogger(__name__)
 
 
+def register_platform_services() -> int:
+    """
+    根据 settings.yaml 中的 OAuth 配置注册平台服务。
+
+    可在启动时调用，也可在保存 OAuth 设置后再次调用以热加载。
+    返回成功注册的平台数量。
+    """
+    from core.config import Config
+    from platform_services.registry import PlatformRegistry
+
+    Config.reset()
+    config = Config()
+
+    PlatformRegistry.clear()
+
+    callback_base = config.get("oauth", "callback_base_url", default="http://localhost:9000")
+
+    def _redirect(platform: str) -> str:
+        return f"{callback_base}/api/oauth/callback/{platform}"
+
+    count = 0
+
+    # YouTube
+    yt_id = config.get("oauth", "youtube", "client_id", default="")
+    yt_sec = config.get("oauth", "youtube", "client_secret", default="")
+    if yt_id and yt_sec:
+        from platform_services.youtube import YouTubeService
+        PlatformRegistry.register(YouTubeService(
+            client_id=yt_id, client_secret=yt_sec, redirect_uri=_redirect("youtube"),
+        ))
+        count += 1
+
+    # Bilibili
+    bili_id = config.get("oauth", "bilibili", "client_id", default="")
+    bili_sec = config.get("oauth", "bilibili", "client_secret", default="")
+    if bili_id and bili_sec:
+        from platform_services.bilibili import BilibiliService
+        PlatformRegistry.register(BilibiliService(
+            client_id=bili_id, client_secret=bili_sec, redirect_uri=_redirect("bilibili"),
+        ))
+        count += 1
+
+    # TikTok
+    tt_id = config.get("oauth", "tiktok", "client_id", default="")
+    tt_sec = config.get("oauth", "tiktok", "client_secret", default="")
+    if tt_id and tt_sec:
+        from platform_services.tiktok import TikTokService
+        PlatformRegistry.register(TikTokService(
+            client_id=tt_id, client_secret=tt_sec, redirect_uri=_redirect("tiktok"),
+        ))
+        count += 1
+
+    # 抖音 (Douyin)
+    dy_id = config.get("oauth", "douyin", "client_id", default="")
+    dy_sec = config.get("oauth", "douyin", "client_secret", default="")
+    if dy_id and dy_sec:
+        from platform_services.douyin import DouyinService
+        PlatformRegistry.register(DouyinService(
+            client_key=dy_id, client_secret=dy_sec, redirect_uri=_redirect("douyin"),
+        ))
+        count += 1
+
+    # Facebook
+    fb_id = config.get("oauth", "facebook", "app_id", default="")
+    fb_sec = config.get("oauth", "facebook", "app_secret", default="")
+    if fb_id and fb_sec:
+        from platform_services.facebook import FacebookService
+        PlatformRegistry.register(FacebookService(
+            client_id=fb_id, client_secret=fb_sec, redirect_uri=_redirect("facebook"),
+        ))
+        count += 1
+
+    # Instagram
+    ig_id = config.get("oauth", "instagram", "app_id", default="")
+    ig_sec = config.get("oauth", "instagram", "app_secret", default="")
+    if ig_id and ig_sec:
+        from platform_services.instagram import InstagramService
+        PlatformRegistry.register(InstagramService(
+            client_id=ig_id, client_secret=ig_sec, redirect_uri=_redirect("instagram"),
+        ))
+        count += 1
+
+    # Twitter/X
+    tw_id = config.get("oauth", "twitter", "client_id", default="")
+    tw_sec = config.get("oauth", "twitter", "client_secret", default="")
+    if tw_id and tw_sec:
+        from platform_services.twitter import TwitterService
+        PlatformRegistry.register(TwitterService(
+            client_id=tw_id, client_secret=tw_sec, redirect_uri=_redirect("twitter"),
+        ))
+        count += 1
+
+    # Pinterest
+    pin_id = config.get("oauth", "pinterest", "client_id", default="")
+    pin_sec = config.get("oauth", "pinterest", "client_secret", default="")
+    if pin_id and pin_sec:
+        from platform_services.pinterest import PinterestService
+        PlatformRegistry.register(PinterestService(
+            client_id=pin_id, client_secret=pin_sec, redirect_uri=_redirect("pinterest"),
+        ))
+        count += 1
+
+    # LinkedIn
+    li_id = config.get("oauth", "linkedin", "client_id", default="")
+    li_sec = config.get("oauth", "linkedin", "client_secret", default="")
+    if li_id and li_sec:
+        from platform_services.linkedin import LinkedInService
+        PlatformRegistry.register(LinkedInService(
+            client_id=li_id, client_secret=li_sec, redirect_uri=_redirect("linkedin"),
+        ))
+        count += 1
+
+    # 快手 (Kwai)
+    kwai_id = config.get("oauth", "kwai", "client_id", default="")
+    kwai_sec = config.get("oauth", "kwai", "client_secret", default="")
+    if kwai_id and kwai_sec:
+        from platform_services.kwai import KwaiService
+        PlatformRegistry.register(KwaiService(
+            client_id=kwai_id, client_secret=kwai_sec, redirect_uri=_redirect("kwai"),
+        ))
+        count += 1
+
+    # 小红书 (Xiaohongshu)
+    xhs_id = config.get("oauth", "xiaohongshu", "client_id", default="")
+    xhs_sec = config.get("oauth", "xiaohongshu", "client_secret", default="")
+    if xhs_id and xhs_sec:
+        from platform_services.xiaohongshu import XiaohongshuService
+        PlatformRegistry.register(XiaohongshuService(
+            client_id=xhs_id, client_secret=xhs_sec, redirect_uri=_redirect("xiaohongshu"),
+        ))
+        count += 1
+
+    # 微信视频号 (Weixin SPH / Channels)
+    wsph_id = config.get("oauth", "weixin_sph", "app_id", default="")
+    wsph_sec = config.get("oauth", "weixin_sph", "app_secret", default="")
+    if wsph_id and wsph_sec:
+        from platform_services.weixin_channels import WeixinChannelsService
+        PlatformRegistry.register(WeixinChannelsService(
+            app_id=wsph_id, app_secret=wsph_sec, redirect_uri=_redirect("weixin_sph"),
+        ))
+        count += 1
+
+    # 微信公众号 (Weixin GZH / Official Account)
+    wgzh_id = config.get("oauth", "weixin_gzh", "app_id", default="")
+    wgzh_sec = config.get("oauth", "weixin_gzh", "app_secret", default="")
+    if wgzh_id and wgzh_sec:
+        from platform_services.weixin_gzh import WeixinGzhService
+        PlatformRegistry.register(WeixinGzhService(
+            app_id=wgzh_id, app_secret=wgzh_sec, redirect_uri=_redirect("weixin_gzh"),
+        ))
+        count += 1
+
+    # Threads (Meta)
+    thr_id = config.get("oauth", "threads", "app_id", default="")
+    thr_sec = config.get("oauth", "threads", "app_secret", default="")
+    if thr_id and thr_sec:
+        from platform_services.threads import ThreadsService
+        PlatformRegistry.register(ThreadsService(
+            client_id=thr_id, client_secret=thr_sec, redirect_uri=_redirect("threads"),
+        ))
+        count += 1
+
+    logger.info("平台服务注册完成: %d 个平台已注册", count)
+    return count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -63,180 +229,7 @@ async def lifespan(app: FastAPI):
     app.state.storage_cleanup_scheduler = cleanup_scheduler
 
     # 注册平台服务（根据 settings.yaml 中的 OAuth 配置自动注册）
-    from platform_services.registry import PlatformRegistry
-
-    callback_base = config.get("oauth", "callback_base_url", default="http://localhost:9000")
-
-    def _make_redirect(platform: str) -> str:
-        return f"{callback_base}/api/oauth/callback/{platform}"
-
-    # YouTube
-    yt_client_id = config.get("oauth", "youtube", "client_id", default="")
-    yt_client_secret = config.get("oauth", "youtube", "client_secret", default="")
-    if yt_client_id and yt_client_secret:
-        from platform_services.youtube import YouTubeService
-        PlatformRegistry.register(YouTubeService(
-            client_id=yt_client_id,
-            client_secret=yt_client_secret,
-            redirect_uri=_make_redirect("youtube"),
-        ))
-        logger.info("YouTube 平台服务已注册")
-
-    # Bilibili
-    bili_client_id = config.get("oauth", "bilibili", "client_id", default="")
-    bili_client_secret = config.get("oauth", "bilibili", "client_secret", default="")
-    if bili_client_id and bili_client_secret:
-        from platform_services.bilibili import BilibiliService
-        PlatformRegistry.register(BilibiliService(
-            client_id=bili_client_id,
-            client_secret=bili_client_secret,
-            redirect_uri=_make_redirect("bilibili"),
-        ))
-        logger.info("Bilibili 平台服务已注册")
-
-    # TikTok
-    tt_client_id = config.get("oauth", "tiktok", "client_id", default="")
-    tt_client_secret = config.get("oauth", "tiktok", "client_secret", default="")
-    if tt_client_id and tt_client_secret:
-        from platform_services.tiktok import TikTokService
-        PlatformRegistry.register(TikTokService(
-            client_id=tt_client_id,
-            client_secret=tt_client_secret,
-            redirect_uri=_make_redirect("tiktok"),
-        ))
-        logger.info("TikTok 平台服务已注册")
-
-    # 抖音 (Douyin)
-    dy_client_id = config.get("oauth", "douyin", "client_id", default="")
-    dy_client_secret = config.get("oauth", "douyin", "client_secret", default="")
-    if dy_client_id and dy_client_secret:
-        from platform_services.douyin import DouyinService
-        PlatformRegistry.register(DouyinService(
-            client_key=dy_client_id,
-            client_secret=dy_client_secret,
-            redirect_uri=_make_redirect("douyin"),
-        ))
-        logger.info("抖音 平台服务已注册")
-
-    # Facebook (Meta — 配置使用 app_id/app_secret)
-    fb_app_id = config.get("oauth", "facebook", "app_id", default="")
-    fb_app_secret = config.get("oauth", "facebook", "app_secret", default="")
-    if fb_app_id and fb_app_secret:
-        from platform_services.facebook import FacebookService
-        PlatformRegistry.register(FacebookService(
-            client_id=fb_app_id,
-            client_secret=fb_app_secret,
-            redirect_uri=_make_redirect("facebook"),
-        ))
-        logger.info("Facebook 平台服务已注册")
-
-    # Instagram (Meta — 配置使用 app_id/app_secret)
-    ig_app_id = config.get("oauth", "instagram", "app_id", default="")
-    ig_app_secret = config.get("oauth", "instagram", "app_secret", default="")
-    if ig_app_id and ig_app_secret:
-        from platform_services.instagram import InstagramService
-        PlatformRegistry.register(InstagramService(
-            client_id=ig_app_id,
-            client_secret=ig_app_secret,
-            redirect_uri=_make_redirect("instagram"),
-        ))
-        logger.info("Instagram 平台服务已注册")
-
-    # Twitter/X
-    tw_client_id = config.get("oauth", "twitter", "client_id", default="")
-    tw_client_secret = config.get("oauth", "twitter", "client_secret", default="")
-    if tw_client_id and tw_client_secret:
-        from platform_services.twitter import TwitterService
-        PlatformRegistry.register(TwitterService(
-            client_id=tw_client_id,
-            client_secret=tw_client_secret,
-            redirect_uri=_make_redirect("twitter"),
-        ))
-        logger.info("Twitter 平台服务已注册")
-
-    # Pinterest
-    pin_client_id = config.get("oauth", "pinterest", "client_id", default="")
-    pin_client_secret = config.get("oauth", "pinterest", "client_secret", default="")
-    if pin_client_id and pin_client_secret:
-        from platform_services.pinterest import PinterestService
-        PlatformRegistry.register(PinterestService(
-            client_id=pin_client_id,
-            client_secret=pin_client_secret,
-            redirect_uri=_make_redirect("pinterest"),
-        ))
-        logger.info("Pinterest 平台服务已注册")
-
-    # LinkedIn
-    li_client_id = config.get("oauth", "linkedin", "client_id", default="")
-    li_client_secret = config.get("oauth", "linkedin", "client_secret", default="")
-    if li_client_id and li_client_secret:
-        from platform_services.linkedin import LinkedInService
-        PlatformRegistry.register(LinkedInService(
-            client_id=li_client_id,
-            client_secret=li_client_secret,
-            redirect_uri=_make_redirect("linkedin"),
-        ))
-        logger.info("LinkedIn 平台服务已注册")
-
-    # 快手 (Kwai)
-    kwai_client_id = config.get("oauth", "kwai", "client_id", default="")
-    kwai_client_secret = config.get("oauth", "kwai", "client_secret", default="")
-    if kwai_client_id and kwai_client_secret:
-        from platform_services.kwai import KwaiService
-        PlatformRegistry.register(KwaiService(
-            client_id=kwai_client_id,
-            client_secret=kwai_client_secret,
-            redirect_uri=_make_redirect("kwai"),
-        ))
-        logger.info("快手 平台服务已注册")
-
-    # 小红书 (Xiaohongshu)
-    xhs_client_id = config.get("oauth", "xiaohongshu", "client_id", default="")
-    xhs_client_secret = config.get("oauth", "xiaohongshu", "client_secret", default="")
-    if xhs_client_id and xhs_client_secret:
-        from platform_services.xiaohongshu import XiaohongshuService
-        PlatformRegistry.register(XiaohongshuService(
-            client_id=xhs_client_id,
-            client_secret=xhs_client_secret,
-            redirect_uri=_make_redirect("xiaohongshu"),
-        ))
-        logger.info("小红书 平台服务已注册")
-
-    # 微信视频号 (Weixin SPH / Channels)
-    wsph_client_id = config.get("oauth", "weixin_sph", "app_id", default="")
-    wsph_client_secret = config.get("oauth", "weixin_sph", "app_secret", default="")
-    if wsph_client_id and wsph_client_secret:
-        from platform_services.weixin_channels import WeixinChannelsService
-        PlatformRegistry.register(WeixinChannelsService(
-            app_id=wsph_client_id,
-            app_secret=wsph_client_secret,
-            redirect_uri=_make_redirect("weixin_sph"),
-        ))
-        logger.info("微信视频号 平台服务已注册")
-
-    # 微信公众号 (Weixin GZH / Official Account)
-    wgzh_app_id = config.get("oauth", "weixin_gzh", "app_id", default="")
-    wgzh_app_secret = config.get("oauth", "weixin_gzh", "app_secret", default="")
-    if wgzh_app_id and wgzh_app_secret:
-        from platform_services.weixin_gzh import WeixinGzhService
-        PlatformRegistry.register(WeixinGzhService(
-            app_id=wgzh_app_id,
-            app_secret=wgzh_app_secret,
-            redirect_uri=_make_redirect("weixin_gzh"),
-        ))
-        logger.info("微信公众号 平台服务已注册")
-
-    # Threads (Meta)
-    threads_app_id = config.get("oauth", "threads", "app_id", default="")
-    threads_app_secret = config.get("oauth", "threads", "app_secret", default="")
-    if threads_app_id and threads_app_secret:
-        from platform_services.threads import ThreadsService
-        PlatformRegistry.register(ThreadsService(
-            client_id=threads_app_id,
-            client_secret=threads_app_secret,
-            redirect_uri=_make_redirect("threads"),
-        ))
-        logger.info("Threads 平台服务已注册")
+    register_platform_services()
 
     # 初始化发布队列
     from core.database import Database

@@ -108,8 +108,7 @@
                     <template x-for="p in allPlatforms" :key="p.platform">
                         <button @click="startConnect(p)"
                                 class="flex flex-col items-center gap-2.5 p-4 rounded-2xl border transition-all cursor-pointer group relative"
-                                :class="p.configured ? 'border-border hover:shadow-card hover:border-fg-faint' : 'border-dashed border-fg-faint/40 opacity-50 cursor-not-allowed'"
-                                :disabled="!p.configured">
+                                :class="p.configured ? 'border-border hover:shadow-card hover:border-fg-faint' : 'border-dashed border-fg-faint/40 opacity-60 hover:opacity-80'">
                             <div class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors"
                                  :style="'background:' + p.color + '12; color:' + p.color">
                                 <i :data-lucide="p.icon" class="w-5 h-5"></i>
@@ -121,7 +120,7 @@
                         </button>
                     </template>
                 </div>
-                <p class="text-[11px] text-fg-faint mt-4 text-center">标记「未配置」的平台需要管理员先在设置中配置 OAuth 密钥</p>
+                <p class="text-[11px] text-fg-faint mt-4 text-center">标记「未配置」的平台需要先在 <a href="/settings" class="text-blue-500 hover:underline">设置 → OAuth 平台</a> 中配置密钥</p>
             </div>
         </div>
     </template>
@@ -232,7 +231,8 @@ function platformAccounts() {
 
         async startConnect(platform) {
             if (!platform.configured) {
-                this.showToast('该平台尚未配置 OAuth 密钥，请联系管理员', 'error');
+                this.showToast('该平台尚未配置 OAuth 密钥，正在跳转到设置页面…', 'error');
+                setTimeout(function() { window.location.href = '/settings'; }, 1200);
                 return;
             }
 
