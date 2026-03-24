@@ -48,10 +48,23 @@ from core.scheduler import StorageCleanupScheduler
 logger = logging.getLogger(__name__)
 
 
+def _env_oauth(platform: str, id_field: str, sec_field: str) -> tuple[str, str]:
+    """从环境变量读取 OAuth 凭证（优先级高于 settings.yaml）。
+
+    环境变量命名规则: OAUTH_{PLATFORM}_{FIELD}
+    例: OAUTH_YOUTUBE_CLIENT_ID, OAUTH_FACEBOOK_APP_SECRET
+    """
+    prefix = f"OAUTH_{platform.upper()}_"
+    env_id = os.environ.get(f"{prefix}{id_field.upper()}", "")
+    env_sec = os.environ.get(f"{prefix}{sec_field.upper()}", "")
+    return env_id, env_sec
+
+
 def register_platform_services() -> int:
     """
-    根据 settings.yaml 中的 OAuth 配置注册平台服务。
+    根据环境变量和 settings.yaml 中的 OAuth 配置注册平台服务。
 
+    优先级: 环境变量 > settings.yaml
     可在启动时调用，也可在保存 OAuth 设置后再次调用以热加载。
     返回成功注册的平台数量。
     """
@@ -63,16 +76,26 @@ def register_platform_services() -> int:
 
     PlatformRegistry.clear()
 
-    callback_base = config.get("oauth", "callback_base_url", default="http://localhost:9000")
+    env_callback = os.environ.get("OAUTH_CALLBACK_BASE_URL", "")
+    yaml_callback = config.get("oauth", "callback_base_url", default="http://localhost:9000")
+    callback_base = env_callback or yaml_callback
 
     def _redirect(platform: str) -> str:
         return f"{callback_base}/api/oauth/callback/{platform}"
 
+    def _get_creds(platform: str, id_field: str, sec_field: str) -> tuple[str, str]:
+        """环境变量优先，再回退到 settings.yaml"""
+        env_id, env_sec = _env_oauth(platform, id_field, sec_field)
+        if env_id and env_sec:
+            return env_id, env_sec
+        yaml_id = config.get("oauth", platform, id_field, default="")
+        yaml_sec = config.get("oauth", platform, sec_field, default="")
+        return yaml_id, yaml_sec
+
     count = 0
 
     # YouTube
-    yt_id = config.get("oauth", "youtube", "client_id", default="")
-    yt_sec = config.get("oauth", "youtube", "client_secret", default="")
+    yt_id, yt_sec = _get_creds("youtube", "client_id", "client_secret")
     if yt_id and yt_sec:
         from platform_services.youtube import YouTubeService
         PlatformRegistry.register(YouTubeService(
@@ -81,8 +104,7 @@ def register_platform_services() -> int:
         count += 1
 
     # Bilibili
-    bili_id = config.get("oauth", "bilibili", "client_id", default="")
-    bili_sec = config.get("oauth", "bilibili", "client_secret", default="")
+    bili_id, bili_sec = _get_creds("bilibili", "client_id", "client_secret")
     if bili_id and bili_sec:
         from platform_services.bilibili import BilibiliService
         PlatformRegistry.register(BilibiliService(
@@ -91,8 +113,7 @@ def register_platform_services() -> int:
         count += 1
 
     # TikTok
-    tt_id = config.get("oauth", "tiktok", "client_id", default="")
-    tt_sec = config.get("oauth", "tiktok", "client_secret", default="")
+    tt_id, tt_sec = _get_creds("tiktok", "client_id", "client_secret")
     if tt_id and tt_sec:
         from platform_services.tiktok import TikTokService
         PlatformRegistry.register(TikTokService(
@@ -101,8 +122,7 @@ def register_platform_services() -> int:
         count += 1
 
     # 抖音 (Douyin)
-    dy_id = config.get("oauth", "douyin", "client_id", default="")
-    dy_sec = config.get("oauth", "douyin", "client_secret", default="")
+    dy_id, dy_sec = _get_creds("douyin", "client_id", "client_secret")
     if dy_id and dy_sec:
         from platform_services.douyin import DouyinService
         PlatformRegistry.register(DouyinService(
@@ -111,8 +131,7 @@ def register_platform_services() -> int:
         count += 1
 
     # Facebook
-    fb_id = config.get("oauth", "facebook", "app_id", default="")
-    fb_sec = config.get("oauth", "facebook", "app_secret", default="")
+    fb_id, fb_sec = _get_creds("facebook", "app_id", "app_secret")
     if fb_id and fb_sec:
         from platform_services.facebook import FacebookService
         PlatformRegistry.register(FacebookService(
@@ -121,8 +140,7 @@ def register_platform_services() -> int:
         count += 1
 
     # Instagram
-    ig_id = config.get("oauth", "instagram", "app_id", default="")
-    ig_sec = config.get("oauth", "instagram", "app_secret", default="")
+    ig_id, ig_sec = _get_creds("instagram", "app_id", "app_secret")
     if ig_id and ig_sec:
         from platform_services.instagram import InstagramService
         PlatformRegistry.register(InstagramService(
@@ -131,8 +149,7 @@ def register_platform_services() -> int:
         count += 1
 
     # Twitter/X
-    tw_id = config.get("oauth", "twitter", "client_id", default="")
-    tw_sec = config.get("oauth", "twitter", "client_secret", default="")
+    tw_id, tw_sec = _get_creds("twitter", "client_id", "client_secret")
     if tw_id and tw_sec:
         from platform_services.twitter import TwitterService
         PlatformRegistry.register(TwitterService(
@@ -141,8 +158,7 @@ def register_platform_services() -> int:
         count += 1
 
     # Pinterest
-    pin_id = config.get("oauth", "pinterest", "client_id", default="")
-    pin_sec = config.get("oauth", "pinterest", "client_secret", default="")
+    pin_id, pin_sec = _get_creds("pinterest", "client_id", "client_secret")
     if pin_id and pin_sec:
         from platform_services.pinterest import PinterestService
         PlatformRegistry.register(PinterestService(
@@ -151,8 +167,7 @@ def register_platform_services() -> int:
         count += 1
 
     # LinkedIn
-    li_id = config.get("oauth", "linkedin", "client_id", default="")
-    li_sec = config.get("oauth", "linkedin", "client_secret", default="")
+    li_id, li_sec = _get_creds("linkedin", "client_id", "client_secret")
     if li_id and li_sec:
         from platform_services.linkedin import LinkedInService
         PlatformRegistry.register(LinkedInService(
@@ -161,8 +176,7 @@ def register_platform_services() -> int:
         count += 1
 
     # 快手 (Kwai)
-    kwai_id = config.get("oauth", "kwai", "client_id", default="")
-    kwai_sec = config.get("oauth", "kwai", "client_secret", default="")
+    kwai_id, kwai_sec = _get_creds("kwai", "client_id", "client_secret")
     if kwai_id and kwai_sec:
         from platform_services.kwai import KwaiService
         PlatformRegistry.register(KwaiService(
@@ -171,8 +185,7 @@ def register_platform_services() -> int:
         count += 1
 
     # 小红书 (Xiaohongshu)
-    xhs_id = config.get("oauth", "xiaohongshu", "client_id", default="")
-    xhs_sec = config.get("oauth", "xiaohongshu", "client_secret", default="")
+    xhs_id, xhs_sec = _get_creds("xiaohongshu", "client_id", "client_secret")
     if xhs_id and xhs_sec:
         from platform_services.xiaohongshu import XiaohongshuService
         PlatformRegistry.register(XiaohongshuService(
@@ -181,8 +194,7 @@ def register_platform_services() -> int:
         count += 1
 
     # 微信视频号 (Weixin SPH / Channels)
-    wsph_id = config.get("oauth", "weixin_sph", "app_id", default="")
-    wsph_sec = config.get("oauth", "weixin_sph", "app_secret", default="")
+    wsph_id, wsph_sec = _get_creds("weixin_sph", "app_id", "app_secret")
     if wsph_id and wsph_sec:
         from platform_services.weixin_channels import WeixinChannelsService
         PlatformRegistry.register(WeixinChannelsService(
@@ -191,8 +203,7 @@ def register_platform_services() -> int:
         count += 1
 
     # 微信公众号 (Weixin GZH / Official Account)
-    wgzh_id = config.get("oauth", "weixin_gzh", "app_id", default="")
-    wgzh_sec = config.get("oauth", "weixin_gzh", "app_secret", default="")
+    wgzh_id, wgzh_sec = _get_creds("weixin_gzh", "app_id", "app_secret")
     if wgzh_id and wgzh_sec:
         from platform_services.weixin_gzh import WeixinGzhService
         PlatformRegistry.register(WeixinGzhService(
@@ -201,8 +212,7 @@ def register_platform_services() -> int:
         count += 1
 
     # Threads (Meta)
-    thr_id = config.get("oauth", "threads", "app_id", default="")
-    thr_sec = config.get("oauth", "threads", "app_secret", default="")
+    thr_id, thr_sec = _get_creds("threads", "app_id", "app_secret")
     if thr_id and thr_sec:
         from platform_services.threads import ThreadsService
         PlatformRegistry.register(ThreadsService(

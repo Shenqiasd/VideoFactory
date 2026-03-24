@@ -553,7 +553,21 @@ def _test_audio_root() -> Path:
 def _read_yaml_config() -> dict[str, Any]:
     path = _config_file_path()
     if not path.exists():
-        raise HTTPException(status_code=500, detail=f"配置文件不存在: {path}")
+        # 自动从 example 创建
+        example = path.parent / "settings.example.yaml"
+        try:
+            if example.exists():
+                import shutil
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(example, path)
+                logger.info("配置文件不存在，已从 settings.example.yaml 自动创建: %s", path)
+            else:
+                # 创建最小空配置
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(yaml.safe_dump({}, allow_unicode=True), encoding="utf-8")
+                logger.info("配置文件不存在，已创建空配置: %s", path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"自动创建配置文件失败: {str(e)}") from e
     try:
         content = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(content, dict):
@@ -1067,24 +1081,48 @@ class OAuthSettingsRequest(BaseModel):
 
 @router.get("/settings/oauth", dependencies=[Depends(require_auth)])
 async def get_oauth_settings():
-    """读取 OAuth 配置（密钥脱敏）。"""
+    """读取 OAuth 配置（密钥脱敏），同时检查环境变量。"""
+    from api.server import _env_oauth
+
     config_data = _read_yaml_config()
     oauth: dict = config_data.get("oauth") or {}
-    callback_base_url = oauth.get("callback_base_url", "http://localhost:9000")
+
+    env_callback = os.environ.get("OAUTH_CALLBACK_BASE_URL", "")
+    yaml_callback = oauth.get("callback_base_url", "http://localhost:9000")
+    callback_base_url = env_callback or yaml_callback
 
     platforms: dict[str, dict[str, str]] = {}
     for plat, (id_key, sec_key) in _OAUTH_PLATFORM_FIELDS.items():
-        plat_cfg = oauth.get(plat) or {}
-        raw_id = plat_cfg.get(id_key, "")
-        raw_sec = plat_cfg.get(sec_key, "")
+        # 检查环境变量
+        env_id, env_sec = _env_oauth(plat, id_key, sec_key)
+        from_env = bool(env_id and env_sec)
+
+        if from_env:
+            # 环境变量已配置，显示脱敏值
+            display_id = _MASK + env_id[-4:] if len(env_id) > 4 else _MASK
+            display_sec = _MASK + env_sec[-4:] if len(env_sec) > 4 else _MASK
+        else:
+            # 回退到 settings.yaml
+            plat_cfg = oauth.get(plat) or {}
+            raw_id = plat_cfg.get(id_key, "")
+            raw_sec = plat_cfg.get(sec_key, "")
+            display_id = (_MASK + raw_id[-4:]) if raw_id else ""
+            display_sec = (_MASK + raw_sec[-4:]) if raw_sec else ""
+
         platforms[plat] = {
             "id_field": id_key,
             "secret_field": sec_key,
-            "id_value": (_MASK + raw_id[-4:]) if raw_id else "",
-            "secret_value": (_MASK + raw_sec[-4:]) if raw_sec else "",
+            "id_value": display_id,
+            "secret_value": display_sec,
+            "from_env": from_env,
         }
 
-    return {"success": True, "callback_base_url": callback_base_url, "platforms": platforms}
+    return {
+        "success": True,
+        "callback_base_url": callback_base_url,
+        "callback_from_env": bool(env_callback),
+        "platforms": platforms,
+    }
 
 
 @router.post("/settings/oauth", dependencies=[Depends(require_auth)])
